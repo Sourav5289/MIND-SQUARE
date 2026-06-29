@@ -410,7 +410,7 @@ function validateBodySchema(schema) {
 const LOGIN_SCHEMA = {
     email: { type: 'string', required: true, maxLength: 254, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
     name: { type: 'string', required: true, maxLength: 100 },
-    avatar: { type: 'string', required: false, maxLength: 2000 }
+    avatar: { type: 'string', required: false, maxLength: 5000000 }
 };
 
 const UPDATE_NAME_SCHEMA = {
@@ -418,7 +418,7 @@ const UPDATE_NAME_SCHEMA = {
 };
 
 const UPDATE_AVATAR_SCHEMA = {
-    avatar: { type: 'string', required: true, maxLength: 2000 }
+    avatar: { type: 'string', required: true, maxLength: 5000000 }
 };
 
 const UPDATE_DOB_SCHEMA = {
