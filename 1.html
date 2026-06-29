@@ -40,19 +40,12 @@
     </div>
 
     <header
-        class="flex justify-between items-center px-margin-mobile md:px-margin-desktop h-16 w-full fixed top-0 left-0 right-0 z-50 bg-surface/70 backdrop-blur-md border-b border-outline-variant/30 shadow-sm pl-64">
+        class="flex justify-between items-center px-margin-mobile md:px-margin-desktop h-16 w-full fixed top-0 left-0 right-0 z-50 bg-surface/70 backdrop-blur-md border-b border-outline-variant/30 shadow-sm">
         <div class="flex items-center gap-3">
 
             <div class="flex items-center gap-2 cursor-pointer" onclick="navigateTo('landing')">
-                <!-- Inline SVG: 2x2 grid logo — renders before icon font loads -->
-                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
-                    class="text-secondary" fill="currentColor" aria-hidden="true">
-                    <rect x="3" y="3" width="7" height="7" rx="1" />
-                    <rect x="14" y="3" width="7" height="7" rx="1" />
-                    <rect x="3" y="14" width="7" height="7" rx="1" />
-                    <rect x="14" y="14" width="7" height="7" rx="1" />
-                </svg>
-                <h1 class="font-display-lg text-headline-lg font-bold tracking-tight text-primary">Mind Square</h1>
+                <img id="header-logo-img" src="images/logo.png" alt="Mind Square Logo"
+                    class="w-auto object-contain transition-all duration-300" />
             </div>
         </div>
 
@@ -62,9 +55,9 @@
             <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer"
                 onclick="navigateTo('classes')">Classes</a>
             <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer"
-                onclick="navigateTo('leaderboard')">Leaderboard</a>
-            <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer"
                 onclick="navigateTo('tournaments')">Tournaments</a>
+            <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer"
+                onclick="navigateTo('leaderboard')">Leaderboard</a>
         </div>
 
         <div class="flex items-center gap-4">
@@ -189,13 +182,13 @@
                 <span class="material-symbols-outlined">face</span>
                 <span class="font-body-md font-semibold">Biometrics</span>
             </a>
-            <a onclick="navigateTo('leaderboard')" class="sidebar-link">
-                <span class="material-symbols-outlined">leaderboard</span>
-                <span class="font-body-md font-semibold">Scorecard</span>
-            </a>
             <a onclick="navigateTo('tournaments')" class="sidebar-link">
                 <span class="material-symbols-outlined">emoji_events</span>
                 <span class="font-body-md font-semibold">Tournaments</span>
+            </a>
+            <a onclick="navigateTo('leaderboard')" class="sidebar-link">
+                <span class="material-symbols-outlined">leaderboard</span>
+                <span class="font-body-md font-semibold">Scorecard</span>
             </a>
         </div>
 
@@ -522,8 +515,7 @@
                                 <span id="dash-user-category"
                                     class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-secondary/20 text-secondary border border-secondary/20">Intermediate</span>
                             </div>
-                            <p id="dash-user-email" class="text-sm text-on-surface-variant mb-4 font-mono">
-                                student@example.com</p>
+                            <p id="dash-user-email" class="text-sm text-on-surface-variant mb-4 font-mono"></p>
 
                             <div class="flex flex-wrap gap-4 justify-center md:justify-start">
                                 <div
@@ -1065,7 +1057,7 @@
                             </p>
                         </div>
                         <a href="https://www.chess.com/tournaments/all" target="_blank" rel="noopener noreferrer"
-                            class="inline-flex items-center gap-3 px-8 py-4 bg-secondary text-on-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/20 hover:scale-[1.03] transition-all rounded-full font-bold text-lg cursor-pointer">
+                            class="inline-flex items-center gap-2 px-6 py-3 bg-secondary text-on-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/20 hover:scale-[1.03] transition-all rounded-full font-bold text-base cursor-pointer whitespace-nowrap">
                             <span class="material-symbols-outlined font-bold">emoji_events</span>
                             Browse Chess.com
                             <span class="material-symbols-outlined text-sm font-bold">arrow_forward</span>
@@ -1093,7 +1085,7 @@
                             </p>
                         </div>
                         <a href="https://lichess.org/tournament" target="_blank" rel="noopener noreferrer"
-                            class="inline-flex items-center gap-3 px-8 py-4 bg-secondary text-on-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/20 hover:scale-[1.03] transition-all rounded-full font-bold text-lg cursor-pointer">
+                            class="inline-flex items-center gap-2 px-6 py-3 bg-secondary text-on-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/20 hover:scale-[1.03] transition-all rounded-full font-bold text-base cursor-pointer whitespace-nowrap">
                             <span class="material-symbols-outlined font-bold">emoji_events</span>
                             Browse Lichess
                             <span class="material-symbols-outlined text-sm font-bold">arrow_forward</span>
@@ -1121,7 +1113,7 @@
                             </p>
                         </div>
                         <a href="https://worldchess.com/tournaments" target="_blank" rel="noopener noreferrer"
-                            class="inline-flex items-center gap-3 px-8 py-4 bg-secondary text-on-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/20 hover:scale-[1.03] transition-all rounded-full font-bold text-lg cursor-pointer">
+                            class="inline-flex items-center gap-2 px-6 py-3 bg-secondary text-on-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/20 hover:scale-[1.03] transition-all rounded-full font-bold text-base cursor-pointer whitespace-nowrap">
                             <span class="material-symbols-outlined font-bold">emoji_events</span>
                             Browse World Chess
                             <span class="material-symbols-outlined text-sm font-bold">arrow_forward</span>
@@ -1149,7 +1141,7 @@
                             </p>
                         </div>
                         <a href="https://chessgurukul.com/online-tournaments/" target="_blank" rel="noopener noreferrer"
-                            class="inline-flex items-center gap-3 px-8 py-4 bg-secondary text-on-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/20 hover:scale-[1.03] transition-all rounded-full font-bold text-lg cursor-pointer">
+                            class="inline-flex items-center gap-2 px-6 py-3 bg-secondary text-on-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/20 hover:scale-[1.03] transition-all rounded-full font-bold text-base cursor-pointer whitespace-nowrap">
                             <span class="material-symbols-outlined font-bold">emoji_events</span>
                             Browse Gurukul
                             <span class="material-symbols-outlined text-sm font-bold">arrow_forward</span>
@@ -1177,7 +1169,7 @@
                             </p>
                         </div>
                         <a href="https://chessmii.com" target="_blank" rel="noopener noreferrer"
-                            class="inline-flex items-center gap-3 px-8 py-4 bg-secondary text-on-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/20 hover:scale-[1.03] transition-all rounded-full font-bold text-lg cursor-pointer">
+                            class="inline-flex items-center gap-2 px-6 py-3 bg-secondary text-on-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/20 hover:scale-[1.03] transition-all rounded-full font-bold text-base cursor-pointer whitespace-nowrap">
                             <span class="material-symbols-outlined font-bold">emoji_events</span>
                             Browse Chessmii
                             <span class="material-symbols-outlined text-sm font-bold">arrow_forward</span>

@@ -1241,6 +1241,23 @@ function getUpcomingClasses(referenceDate) {
 const DAYS_MAP = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 let currentSelectedDay = DAYS_MAP[new Date().getDay()];
 
+function autoSelectNextDayWithClasses() {
+    if (!CLASS_SCHEDULE || CLASS_SCHEDULE.length === 0) return;
+    const todayName = DAYS_MAP[new Date().getDay()];
+    const todayHasClasses = CLASS_SCHEDULE.some(c => c.day === todayName);
+    if (currentSelectedDay === todayName && !todayHasClasses) {
+        const daysOrder = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+        const todayIdx = new Date().getDay();
+        for (let i = 0; i < 7; i++) {
+            const checkDay = daysOrder[(todayIdx + i) % 7];
+            if (CLASS_SCHEDULE.some(c => c.day === checkDay)) {
+                currentSelectedDay = checkDay;
+                break;
+            }
+        }
+    }
+}
+
 function renderClassesTabs() {
     const tabsContainer = document.getElementById('classes-day-tabs');
     if (!tabsContainer) return;
@@ -1250,13 +1267,18 @@ function renderClassesTabs() {
 
     days.forEach(day => {
         const isActive = currentSelectedDay === day;
+        const count = (CLASS_SCHEDULE || []).filter(c => c.day === day).length;
+        const indicator = count > 0 
+            ? ` <span class="ml-1.5 px-1.5 py-0.5 text-[9px] rounded-full ${isActive ? 'bg-on-secondary text-secondary' : 'bg-secondary/20 text-secondary'} font-bold">${count}</span>`
+            : '';
+
         const btnClass = isActive
-            ? "px-5 py-2 bg-secondary text-on-secondary rounded-full text-xs font-bold shadow-lg shadow-secondary/15 transition-all cursor-pointer"
-            : "px-5 py-2 bg-surface-variant text-on-surface rounded-full text-xs font-semibold border border-outline-variant hover:bg-surface-variant/80 transition-all cursor-pointer";
+            ? "px-4 py-2 bg-secondary text-on-secondary rounded-full text-xs font-bold shadow-lg shadow-secondary/15 transition-all cursor-pointer inline-flex items-center"
+            : "px-4 py-2 bg-surface-variant text-on-surface rounded-full text-xs font-semibold border border-outline-variant hover:bg-surface-variant/80 transition-all cursor-pointer inline-flex items-center";
 
         tabsContainer.innerHTML += `
             <button onclick="filterClassesByDay('${escapeJSAttr(day)}')" class="${btnClass}">
-                ${escapeHTML(day)}
+                ${escapeHTML(day)}${indicator}
             </button>
         `;
     });
@@ -1322,6 +1344,8 @@ function renderClassesList() {
         API.getSchedules().then(data => {
             if (Array.isArray(data) && data.length > 0) {
                 CLASS_SCHEDULE = data;
+                autoSelectNextDayWithClasses();
+                renderClassesTabs();
                 renderClassesList();
             } else {
                 gridContainer.innerHTML = `
@@ -1425,9 +1449,17 @@ function renderClassesList() {
                             <span class="px-2 py-0.5 rounded text-[9px] font-bold inline-block mt-0.5 ${styles.bg}">${escapeHTML(cls.level)}</span>
                         </div>
                     </div>
-                    <h4 class="text-lg font-bold text-on-surface group-hover:text-secondary transition-colors mb-2">
+                    <h4 class="text-lg font-bold text-on-surface group-hover:text-secondary transition-colors mb-1">
                         ${escapeHTML(details.title)}
                     </h4>
+                    
+                    <div class="flex items-center gap-2 mb-3 text-xs font-semibold text-secondary/90 bg-secondary/5 px-3 py-1.5 rounded-xl border border-secondary/10 w-fit">
+                        <span class="material-symbols-outlined text-sm text-secondary">schedule</span>
+                        <span>${escapeHTML(cls.time)}</span>
+                        <span class="text-on-surface-variant/30">|</span>
+                        <span class="material-symbols-outlined text-sm text-secondary">calendar_today</span>
+                        <span>${cls.occurrenceDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                    </div>
                     <p class="text-xs text-on-surface-variant leading-relaxed mb-4 font-body-md">
                         ${escapeHTML(details.desc)}
                     </p>
@@ -1617,6 +1649,7 @@ function navigateTo(tabId, keepViewingUser = false) {
     }
 
     if (tabId === 'classes') {
+        autoSelectNextDayWithClasses();
         renderClassesTabs();
         renderClassesList();
         initClassCountdown();
@@ -2109,6 +2142,7 @@ function updateAuthUI() {
                 <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('vision-trainer')">Vision</a>
                 <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('openings')">Openings</a>
                 <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('classes')">Classes</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('tournaments')">Tournaments</a>
                 <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('leaderboard')">Leaderboard</a>
             `;
         }
@@ -2151,6 +2185,7 @@ function updateAuthUI() {
                 <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('vision-trainer')">Vision</a>
                 <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('openings')">Openings</a>
                 <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('classes')">Classes</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('tournaments')">Tournaments</a>
                 <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('leaderboard')">Leaderboard</a>
             `;
         }

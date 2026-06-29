@@ -600,5 +600,10 @@ header.pl-64 {
         border-radius: 9999px !important;
     }
 }
-
-
+/* Logo styling and dark mode invert */
+#header-logo-img {
+    height: 3rem !important; /* 48px - larger logo size */
+}
+.dark #header-logo-img {
+    filter: brightness(0) invert(1);
+}

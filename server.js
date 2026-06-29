@@ -814,7 +814,10 @@ app.use((req, res, next) => {
 
     fs.stat(filePath, (err, stats) => {
         if (err || !stats.isFile()) {
-            console.log('fs.stat failed or not a file for:', filePath, 'error:', err ? err.message : 'none');
+            const isNoisyPath = ['/apple-touch-icon.png', '/apple-touch-icon-precomposed.png'].includes(req.path);
+            if (!isNoisyPath) {
+                console.log('fs.stat failed or not a file for:', filePath, 'error:', err ? err.message : 'none');
+            }
             return next();
         }
 
@@ -2333,7 +2336,7 @@ app.get('/api/schedules', async (req, res) => {
             return res.json(schedules);
         }
 
-        // Guest-safe view: omit enrolled student names and Zoom credentials
+        // Guest-safe view: omit Zoom credentials but keep enrolled student names
         const sanitized = schedules.map(s => ({
             id: s.id,
             day: s.day,
@@ -2341,8 +2344,8 @@ app.get('/api/schedules', async (req, res) => {
             hour: s.hour,
             minute: s.minute,
             level: s.level,
-            students: [],   // Hidden until authenticated
-            link: null,     // Zoom link hidden until authenticated
+            students: s.students, // Expose enrolled students publically
+            link: null,          // Zoom link hidden until authenticated
         }));
         res.json(sanitized);
     } catch (err) {
