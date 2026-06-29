@@ -1479,10 +1479,20 @@ app.post('/api/students/login', dbAuthRateLimiter, validateBodySchema(LOGIN_SCHE
             // Update role on login to stay in sync with configuration changes
             await executeClientQuery(client, 'UPDATE students SET role = ? WHERE id = ?', [role, studentId]);
         } else {
-            // Register new student
-            const countRows = await executeClientQuery(client, 'SELECT COUNT(*) as count FROM students');
-            const total = parseInt(countRows[0]?.count || 0) + 1;
-            studentId = `MS-${String(total).padStart(3, '0')}`;
+            // Register new student - find the maximum existing MS-XXX ID to prevent key duplication
+            const maxIdRows = await executeClientQuery(
+                client,
+                "SELECT id FROM students WHERE id LIKE 'MS-%' ORDER BY id DESC LIMIT 1"
+            );
+            let nextNum = 1;
+            if (maxIdRows.length > 0) {
+                const maxIdStr = maxIdRows[0].id;
+                const numPart = parseInt(maxIdStr.substring(3));
+                if (!isNaN(numPart)) {
+                    nextNum = numPart + 1;
+                }
+            }
+            studentId = `MS-${String(nextNum).padStart(3, '0')}`;
             const defaultAvatar = avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name)}`;
 
             await executeClientQuery(
