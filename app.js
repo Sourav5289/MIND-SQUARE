@@ -555,6 +555,12 @@ window.syncDatabaseWithServer = async function () {
         if (myProfile) {
             setCurrentUser(myProfile);
         }
+        // Auto-connect to live challenge socket on successful sync if user is logged in
+        if (typeof window.initLiveChallenge === 'function') {
+            window.initLiveChallenge();
+        } else if (typeof initLiveChallenge === 'function') {
+            initLiveChallenge();
+        }
     }
 
     renderLeaderboard();
@@ -2146,6 +2152,12 @@ window.closeBirthdayModal = function () {
 
 // Perform client-side user logout
 async function logoutUser() {
+    if (_liveWS) {
+        try {
+            _liveWS.close();
+        } catch (e) {}
+        _liveWS = null;
+    }
     try {
         await fetch('/api/auth/logout', {
             method: 'POST',
@@ -2160,6 +2172,7 @@ async function logoutUser() {
     // Re-sync after logout so schedule view drops back to guest (sanitized) view
     window.syncDatabaseWithServer();
 }
+window.logoutUser = logoutUser;
 
 // Visual Notification alerts
 function showNotification(msg, type = "success") {
@@ -3785,6 +3798,7 @@ function initLiveChallenge() {
         _liveWS = null;
     };
 }
+window.initLiveChallenge = initLiveChallenge;
 
 function handleLiveWSMessage(msg) {
     switch (msg.type) {
@@ -3799,6 +3813,11 @@ function handleLiveWSMessage(msg) {
             break;
         case 'challenge_declined':
             showNotification(`${msg.declinedByName} declined your challenge.`, 'error');
+            break;
+        case 'tournaments_updated':
+            if (typeof loadAcademyTournaments === 'function') {
+                loadAcademyTournaments();
+            }
             break;
         case 'opponent_move':
             applyOpponentMove(msg.move, msg.fen);
@@ -3860,6 +3879,7 @@ function sendChallengeInvite(targetUserId, targetUserName, clockLimit) {
     _liveWS.send(JSON.stringify({ type: 'challenge_invite', targetUserId, clockLimit: clockLimit || 300 }));
     showNotification(`Challenge sent to ${targetUserName}!`, 'success');
 }
+window.sendChallengeInvite = sendChallengeInvite;
 
 function showChallengeInvite(msg) {
     const user = getCurrentUser();
@@ -3876,6 +3896,29 @@ function showChallengeInvite(msg) {
             </div>
         `;
     }
+
+    // Floating global challenge invite toast at bottom-right of screen
+    const toastId = 'live-challenge-toast-' + msg.senderId;
+    let toast = document.getElementById(toastId);
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = toastId;
+        toast.className = 'fixed bottom-4 right-4 z-[9999] max-w-sm w-full p-4 rounded-xl shadow-2xl glass-card border border-outline-variant bg-surface/90 text-on-surface animate-bounce';
+        document.body.appendChild(toast);
+    }
+    toast.innerHTML = `
+        <div class="flex flex-col gap-3">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-secondary">swords</span>
+                <span class="text-sm font-bold">Live Challenge Invite!</span>
+            </div>
+            <p class="text-xs text-on-surface-variant"><strong>${escapeHTML(msg.senderName)}</strong> has challenged you to a live match!</p>
+            <div class="flex justify-end gap-2 mt-1">
+                <button onclick="declineChallenge('${msg.senderId}'); document.getElementById('${toastId}')?.remove();" class="px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg text-xs font-bold hover:bg-red-500/20 transition-all cursor-pointer">Decline</button>
+                <button onclick="acceptChallenge('${msg.senderId}', ${msg.clockLimit}); document.getElementById('${toastId}')?.remove();" class="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition-all cursor-pointer">Accept</button>
+            </div>
+        </div>
+    `;
 }
 
 function acceptChallenge(senderId, clockLimit) {
@@ -3884,6 +3927,7 @@ function acceptChallenge(senderId, clockLimit) {
     const banner = document.getElementById('live-challenge-invite-banner');
     if (banner) banner.classList.add('hidden');
 }
+window.acceptChallenge = acceptChallenge;
 
 function declineChallenge(senderId) {
     if (!_liveWS) return;
@@ -3891,6 +3935,7 @@ function declineChallenge(senderId) {
     const banner = document.getElementById('live-challenge-invite-banner');
     if (banner) banner.classList.add('hidden');
 }
+window.declineChallenge = declineChallenge;
 
 function startLiveGame(msg) {
     const user = getCurrentUser();

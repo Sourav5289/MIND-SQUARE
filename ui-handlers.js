@@ -355,6 +355,15 @@
 // CENTRALIZED EVENT DELEGATION SYSTEM (CSP Hardening / OWASP XSS Mitigation)
 // ============================================================================
 document.addEventListener('click', (event) => {
+    // Close profile dropdown if clicking outside
+    const dropdown = document.getElementById('navbar-profile-dropdown');
+    if (dropdown && !dropdown.classList.contains('hidden')) {
+        const profileContainer = document.getElementById('navbar-user-profile');
+        if (profileContainer && !profileContainer.contains(event.target)) {
+            dropdown.classList.add('hidden');
+        }
+    }
+
     let target = event.target;
     while (target && target !== document.body && target !== document.documentElement) {
         if (target.hasAttribute('data-nav')) {
@@ -706,6 +715,12 @@ function executeGlobalAction(action, arg, target, event) {
                     target.getAttribute('data-schedule-id'),
                     parseInt(target.getAttribute('data-recording-id'), 10)
                 );
+            }
+            break;
+        case 'toggleProfileDropdown':
+            const profileDropdown = document.getElementById('navbar-profile-dropdown');
+            if (profileDropdown) {
+                profileDropdown.classList.toggle('hidden');
             }
             break;
     }

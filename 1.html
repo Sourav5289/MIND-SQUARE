@@ -6,10 +6,10 @@
     <script src="theme-init.js"></script>
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
     <title>Mind Square | Chess Academy & Engine</title>
-    <link rel="icon"
-        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👑</text></svg>">
-    <link rel="apple-touch-icon" href="apple-touch-icon.png">
-    <link rel="apple-touch-icon-precomposed" href="apple-touch-icon-precomposed.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👑</text></svg>">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png">
     <link rel="dns-prefetch" href="https://accounts.google.com" />
     <link rel="stylesheet" href="vendor/fonts/fonts.css" />
     <link rel="stylesheet" href="tailwind.built.css" />
@@ -92,7 +92,7 @@
             </button>
 
             <div id="navbar-user-profile" class="hidden relative group">
-                <button
+                <button data-action="toggleProfileDropdown" id="navbar-profile-btn"
                     class="flex items-center gap-2 py-1.5 px-3 rounded-full hover:bg-surface-variant border border-outline-variant/30 transition-all">
                     <img id="navbar-avatar" class="w-8 h-8 rounded-full border border-secondary bg-surface-container"
                         src="" />
@@ -100,8 +100,8 @@
                         class="font-bold text-sm text-on-surface max-w-[100px] truncate">Student</span>
                     <span class="material-symbols-outlined text-sm text-on-surface-variant">expand_more</span>
                 </button>
-                <div
-                    class="absolute right-0 top-full mt-2 w-56 rounded-xl glass-card border border-outline-variant/50 p-2 hidden group-hover:block z-50">
+                <div id="navbar-profile-dropdown"
+                    class="absolute right-0 top-full mt-2 w-56 rounded-xl glass-card border border-outline-variant/50 p-2 hidden z-50">
                     <div class="px-4 py-2 border-b border-outline-variant/30 text-left">
                         <span class="text-xs text-secondary font-bold block uppercase tracking-wider">Chess
                             Student</span>

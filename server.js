@@ -758,7 +758,7 @@ function stripJSComments(code) {
     return result;
 }
 
-const BINARY_STATIC_EXTENSIONS = new Set(['.woff2', '.woff', '.png', '.jpg', '.jpeg', '.gif', '.svg']);
+const BINARY_STATIC_EXTENSIONS = new Set(['.woff2', '.woff', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico']);
 const BINARY_MIME_TYPES = {
     '.woff2': 'font/woff2',
     '.woff': 'font/woff',
@@ -766,7 +766,8 @@ const BINARY_MIME_TYPES = {
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
     '.gif': 'image/gif',
-    '.svg': 'image/svg+xml'
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon'
 };
 
 function shouldSkipCommentStrip(relativePath) {
@@ -934,7 +935,7 @@ app.use((req, res, next) => {
     }
 
     const ext = path.extname(req.path).toLowerCase();
-    const allowedExtensions = ['.html', '.js', '.css', '.woff2', '.woff', '.png', '.jpg', '.jpeg', '.gif', '.svg'];
+    const allowedExtensions = ['.html', '.js', '.css', '.woff2', '.woff', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico'];
 
     if (req.path.startsWith('/api') || (ext && !allowedExtensions.includes(ext))) {
         return next();
@@ -2501,6 +2502,7 @@ app.post('/api/tournaments/academy', authenticate, async (req, res) => {
             'INSERT INTO academy_tournaments (title, description, start_date, created_by) VALUES (?, ?, ?, ?) RETURNING *',
             [title.substring(0, 200), (description || '').substring(0, 1000), start_date || null, req.user.id]
         );
+        broadcastToAll({ type: 'tournaments_updated' });
         res.json(rows[0]);
     } catch (err) {
         console.error('Failed to create tournament:', err);
@@ -2516,6 +2518,7 @@ app.post('/api/tournaments/academy/:id/register', authenticate, async (req, res)
             'INSERT INTO tournament_registrations (tournament_id, student_id) VALUES (?, ?) ON CONFLICT DO NOTHING',
             [tournamentId, req.user.id]
         );
+        broadcastToAll({ type: 'tournaments_updated' });
         res.json({ success: true });
     } catch (err) {
         console.error('Failed to register for tournament:', err);
@@ -2530,6 +2533,7 @@ app.delete('/api/tournaments/academy/:id', authenticate, async (req, res) => {
     }
     try {
         await executeQuery('DELETE FROM academy_tournaments WHERE id = ?', [req.params.id]);
+        broadcastToAll({ type: 'tournaments_updated' });
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Failed to delete tournament' });
@@ -2546,6 +2550,7 @@ app.patch('/api/tournaments/academy/:id/status', authenticate, async (req, res) 
     if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status.' });
     try {
         await executeQuery('UPDATE academy_tournaments SET status = ? WHERE id = ?', [status, req.params.id]);
+        broadcastToAll({ type: 'tournaments_updated' });
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Failed to update tournament status' });
@@ -2682,8 +2687,21 @@ function schedulePointsDecay() {
 // ============================================================
 const { WebSocketServer } = require('ws');
 
+let wssInstance = null;
+function broadcastToAll(messageObj) {
+    if (wssInstance) {
+        const msgStr = JSON.stringify(messageObj);
+        wssInstance.clients.forEach(client => {
+            if (client.readyState === 1) { // WebSocket.OPEN
+                client.send(msgStr);
+            }
+        });
+    }
+}
+
 function initWebSocketServer(httpServer) {
     const wss = new WebSocketServer({ server: httpServer });
+    wssInstance = wss;
     const clients = new Map();       // userId  -> ws
     const spectatorRooms = new Map(); // gameId  -> Set<ws>
 
