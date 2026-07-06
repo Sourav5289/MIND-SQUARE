@@ -286,6 +286,16 @@ const BADGES = {
     "Advanced": { name: "Rook Tactician", icon: "workspace_premium", color: "from-amber-500 to-orange-500", desc: "For demonstrating advanced positional play and endgame skills." },
     "Super Advanced": { name: "Grandmaster Mind", icon: "stars", color: "from-rose-500 to-red-600 animate-pulse", desc: "For achieving elite mastery, high ELO, and complex calculations." },
     "Grandmaster": { name: "Legendary Grandmaster", icon: "emoji_events", color: "from-yellow-400 via-amber-500 to-orange-600 animate-pulse font-extrabold", desc: "For achieving supreme mastery of 10,000+ points." },
+    "FirstBlood": { name: "First Blood", icon: "colorize", color: "from-red-400 to-rose-500", desc: "For winning your first game in the Arena." },
+    "Unstoppable": { name: "Unstoppable", icon: "local_fire_department", color: "from-orange-500 to-red-600 animate-pulse", desc: "For winning 3 games in a row." },
+    "Invincible": { name: "Invincible", icon: "workspace_premium", color: "from-purple-600 via-pink-600 to-red-600 animate-pulse", desc: "For winning 5 games in a row." },
+    "TacticWizard": { name: "Tactic Wizard", icon: "auto_awesome", color: "from-cyan-400 to-blue-600", desc: "For solving 10 puzzles in the Tactics Trainer." },
+    "PuzzleMaster": { name: "Puzzle Master", icon: "psychology", color: "from-indigo-400 to-purple-600 animate-pulse", desc: "For solving 50 puzzles." },
+    "DeepThinker": { name: "Deep Thinker", icon: "hourglass_empty", color: "from-teal-400 to-emerald-600", desc: "For winning an Untimed game." },
+    "SpeedDemon": { name: "Speed Demon", icon: "bolt", color: "from-amber-400 to-yellow-500 animate-pulse", desc: "For winning a 1m Bullet game." },
+    "Blitzkrieg": { name: "Blitzkrieg", icon: "flash_on", color: "from-red-500 to-orange-500", desc: "For winning a 3m Blitz game." },
+    "RapidMaster": { name: "Rapid Master", icon: "schedule", color: "from-blue-600 to-indigo-700", desc: "For winning a 10m Rapid game." },
+    "Scholar": { name: "Active Scholar", icon: "assignment", color: "from-blue-400 to-indigo-600", desc: "For completing 5 homework assignments." },
     "Other": { name: "Creative Maverick", icon: "auto_awesome", color: "from-emerald-500 to-teal-500", desc: "For unique playstyles and exceptional creative solutions." }
 };
 
@@ -360,12 +370,18 @@ const API = {
             return null;
         }
     },
-    async login(email, name, avatar) {
+    async login(credential, email = '', name = '', avatar = '') {
         try {
+            const body = {};
+            if (credential) body.credential = credential;
+            if (email) body.email = email;
+            if (name) body.name = name;
+            if (avatar) body.avatar = avatar;
+
             const res = await fetch(API_BASE + '/api/students/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, name, avatar })
+                body: JSON.stringify(body)
             });
             if (!res.ok) throw new Error('Login failed');
             return await res.json();
@@ -378,6 +394,7 @@ const API = {
         try {
             const res = await fetch(API_BASE + `/api/students/${id}/name`, {
                 method: 'PUT',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name })
             });
@@ -392,6 +409,7 @@ const API = {
         try {
             const res = await fetch(API_BASE + `/api/students/${id}/avatar`, {
                 method: 'PUT',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ avatar })
             });
@@ -406,6 +424,7 @@ const API = {
         try {
             const res = await fetch(API_BASE + `/api/students/${id}/dob`, {
                 method: 'PUT',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ dob })
             });
@@ -420,6 +439,7 @@ const API = {
         try {
             const res = await fetch(API_BASE + `/api/students/${id}/check-birthday`, {
                 method: 'POST',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' }
             });
             if (!res.ok) throw new Error('Failed to check birthday reward');
@@ -428,25 +448,13 @@ const API = {
             console.error('API.checkBirthday error:', e);
             return null;
         }
-    },
-    async markAttendance(id, date) {
-        try {
-            const res = await fetch(API_BASE + `/api/students/${id}/attendance`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ date })
-            });
-            if (!res.ok) throw new Error('Failed to mark attendance');
-            return await res.json();
-        } catch (e) {
-            console.error('API.markAttendance error:', e);
-            return null;
-        }
+
     },
     async updateStats(id, points, gamesPlayed, winCount, badges, solvedPuzzles) {
         try {
             const res = await fetch(API_BASE + `/api/students/${id}/stats`, {
                 method: 'POST',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ points, gamesPlayed, winCount, badges, solvedPuzzles })
             });
@@ -457,82 +465,11 @@ const API = {
             return null;
         }
     },
-    async teacherUpdatePoints(studentId, points) {
-        try {
-            const currentUser = getCurrentUser();
-            const callerId = currentUser ? currentUser.id : '';
-            const res = await fetch(API_BASE + `/api/teachers/students/${studentId}/points`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Caller-Id': callerId
-                },
-                body: JSON.stringify({ points })
-            });
-            if (!res.ok) throw new Error('Failed to update student points');
-            return await res.json();
-        } catch (e) {
-            console.error('API.teacherUpdatePoints error:', e);
-            return null;
-        }
-    },
-    async teacherAddBadge(studentId, badgeId) {
-        try {
-            const currentUser = getCurrentUser();
-            const callerId = currentUser ? currentUser.id : '';
-            const res = await fetch(API_BASE + `/api/teachers/students/${studentId}/badges`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Caller-Id': callerId
-                },
-                body: JSON.stringify({ badgeId })
-            });
-            if (!res.ok) throw new Error('Failed to add badge to student');
-            return await res.json();
-        } catch (e) {
-            console.error('API.teacherAddBadge error:', e);
-            return null;
-        }
-    },
-    async teacherRemoveBadge(studentId, badgeId) {
-        try {
-            const currentUser = getCurrentUser();
-            const callerId = currentUser ? currentUser.id : '';
-            const res = await fetch(API_BASE + `/api/teachers/students/${studentId}/badges/${badgeId}`, {
-                method: 'DELETE',
-                headers: {
-                    'X-Caller-Id': callerId
-                }
-            });
-            if (!res.ok) throw new Error('Failed to remove badge from student');
-            return await res.json();
-        } catch (e) {
-            console.error('API.teacherRemoveBadge error:', e);
-            return null;
-        }
-    },
-
-    // --- Teacher Suite: Homework ---
-    async assignHomework(studentId, puzzleId) {
-        try {
-            const currentUser = getCurrentUser();
-            const callerId = currentUser ? currentUser.id : '';
-            const res = await fetch(API_BASE + '/api/teachers/homework', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Caller-Id': callerId },
-                body: JSON.stringify({ studentId, puzzleId })
-            });
-            if (!res.ok) throw new Error('Failed to assign homework');
-            return await res.json();
-        } catch (e) {
-            console.error('API.assignHomework error:', e);
-            return null;
-        }
-    },
     async getHomework(studentId) {
         try {
-            const res = await fetch(API_BASE + `/api/students/${studentId}/homework`);
+            const res = await fetch(API_BASE + `/api/students/${studentId}/homework`, {
+                credentials: 'include'
+            });
             if (!res.ok) throw new Error('Failed to get homework');
             return await res.json();
         } catch (e) {
@@ -544,6 +481,7 @@ const API = {
         try {
             const res = await fetch(API_BASE + `/api/students/${studentId}/homework/${assignmentId}/complete`, {
                 method: 'PUT',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' }
             });
             if (!res.ok) throw new Error('Failed to complete homework');
@@ -553,75 +491,6 @@ const API = {
             return null;
         }
     },
-    async assignHomeworkToAll(puzzleId) {
-        try {
-            const currentUser = getCurrentUser();
-            const callerId = currentUser ? currentUser.id : '';
-            const res = await fetch(API_BASE + '/api/teachers/homework/all', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Caller-Id': callerId },
-                body: JSON.stringify({ puzzleId })
-            });
-            if (!res.ok) throw new Error('Failed to bulk-assign homework');
-            return await res.json();
-        } catch (e) {
-            console.error('API.assignHomeworkToAll error:', e);
-            return null;
-        }
-    },
-
-    // --- Teacher Suite: Coaching Notes ---
-    async updateCoachingNotes(studentId, notes) {
-        try {
-            const currentUser = getCurrentUser();
-            const callerId = currentUser ? currentUser.id : '';
-            const res = await fetch(API_BASE + `/api/teachers/students/${studentId}/coaching-notes`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'X-Caller-Id': callerId },
-                body: JSON.stringify({ notes })
-            });
-            if (!res.ok) throw new Error('Failed to update coaching notes');
-            return await res.json();
-        } catch (e) {
-            console.error('API.updateCoachingNotes error:', e);
-            return null;
-        }
-    },
-
-    // --- Teacher Suite: Attendance ---
-    async logManualAttendance(studentId, date) {
-        try {
-            const currentUser = getCurrentUser();
-            const callerId = currentUser ? currentUser.id : '';
-            const res = await fetch(API_BASE + `/api/teachers/students/${studentId}/attendance`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Caller-Id': callerId },
-                body: JSON.stringify({ date })
-            });
-            if (!res.ok) throw new Error('Failed to log attendance');
-            return await res.json();
-        } catch (e) {
-            console.error('API.logManualAttendance error:', e);
-            return null;
-        }
-    },
-    async removeManualAttendance(studentId, date) {
-        try {
-            const currentUser = getCurrentUser();
-            const callerId = currentUser ? currentUser.id : '';
-            const res = await fetch(API_BASE + `/api/teachers/students/${studentId}/attendance/${date}`, {
-                method: 'DELETE',
-                headers: { 'X-Caller-Id': callerId }
-            });
-            if (!res.ok) throw new Error('Failed to remove attendance');
-            return await res.json();
-        } catch (e) {
-            console.error('API.removeManualAttendance error:', e);
-            return null;
-        }
-    },
-
-    // --- Teacher Suite: Schedules ---
     async getSchedules() {
         try {
             const hit = clientCache.get('schedules');
@@ -634,42 +503,6 @@ const API = {
         } catch (e) {
             console.error('API.getSchedules error:', e);
             return [];
-        }
-    },
-    async updateSchedule(id, day, time, hour, minute, level, students, link) {
-        try {
-            const currentUser = getCurrentUser();
-            const callerId = currentUser ? currentUser.id : '';
-            const res = await fetch(API_BASE + `/api/teachers/schedules/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'X-Caller-Id': callerId },
-                body: JSON.stringify({ day, time, hour, minute, level, students, link })
-            });
-            if (!res.ok) throw new Error('Failed to update schedule');
-            return await res.json();
-        } catch (e) {
-            console.error('API.updateSchedule error:', e);
-            return null;
-        }
-    },
-
-    // --- Teacher Suite: Analytics ---
-    async getTeacherAnalytics() {
-        try {
-            const currentUser = getCurrentUser();
-            const callerId = currentUser ? currentUser.id : '';
-            const hit = clientCache.get('analytics');
-            if (hit) return hit;
-            const res = await fetch(API_BASE + '/api/teachers/analytics', {
-                headers: { 'X-Caller-Id': callerId }
-            });
-            if (!res.ok) throw new Error('Failed to get analytics');
-            const data = await res.json();
-            clientCache.set('analytics', data, 60_000); // 60 s
-            return data;
-        } catch (e) {
-            console.error('API.getTeacherAnalytics error:', e);
-            return null;
         }
     }
 };
@@ -739,9 +572,44 @@ function saveStudents(students) {
     renderLeaderboard();
 }
 
+const ADMIN_EMAIL = 'mindsquarechessclass@gmail.com';
+
+function applyAdminOverrides(user) {
+    if (!user || !user.email || user.email.toLowerCase() !== ADMIN_EMAIL) return user;
+
+    user.points = Infinity;
+    user.category = 'Grandmaster';
+    user.gamesPlayed = 100;
+    user.winCount = 100;
+
+    // Grant all badges
+    if (typeof BADGES !== 'undefined') {
+        user.badges = Object.keys(BADGES);
+    }
+
+    // Mark all puzzles as solved for full tactics performance
+    const detailed = [];
+    const solvedList = [];
+    const today = new Date();
+    for (let i = 0; i < 365; i++) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        const dStr = d.toISOString().split('T')[0];
+        detailed.push({ id: 'admin_puzzle_' + i, date: dStr });
+    }
+    if (typeof PUZZLES !== 'undefined') {
+        PUZZLES.forEach(p => solvedList.push(p.id));
+    }
+    user.solvedPuzzlesDetailed = detailed;
+    user.solvedPuzzles = solvedList;
+
+    return user;
+}
+
 function getCurrentUser() {
     const userJson = localStorage.getItem('mindsquare_current_user');
-    return userJson ? JSON.parse(userJson) : null;
+    if (!userJson) return null;
+    return applyAdminOverrides(JSON.parse(userJson));
 }
 
 function setCurrentUser(user) {
@@ -818,7 +686,7 @@ async function loginWithGoogle(credential) {
         const defaultAvatar = payload.picture || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name)}`;
 
         showNotification("Signing in...", "info");
-        const student = await API.login(email, name, defaultAvatar);
+        const student = await API.login(credential);
         if (student) {
             // Update in local cache
             const students = getStudents();
@@ -843,220 +711,21 @@ async function loginWithGoogle(credential) {
     }
 }
 
+
+
+
 function decodeJwt(token) {
     var base64Url = token.split('.')[1];
     var base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
     var jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function (c) {
         return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
     }).join(''));
-
     return JSON.parse(jsonPayload);
-}
-
-
-async function markAttendanceForActiveUser() {
-    const currentUser = getCurrentUser();
-    if (!currentUser) {
-        showNotification("Please sign in first!", "error");
-        return;
-    }
-
-    const todayStr = new Date().toISOString().split('T')[0];
-    const hasAttendedToday = currentUser.attendance && currentUser.attendance.history && currentUser.attendance.history.includes(todayStr);
-
-    if (hasAttendedToday) {
-        showNotification("Attendance already marked for today!", "warning");
-        return;
-    }
-
-    showNotification("Logging attendance in database...", "info");
-    const updatedUser = await API.markAttendance(currentUser.id, todayStr);
-    if (updatedUser) {
-        const students = getStudents();
-        const studentIndex = students.findIndex(s => s.id === currentUser.id);
-        if (studentIndex !== -1) {
-            students[studentIndex] = updatedUser;
-            saveStudents(students);
-        }
-        setCurrentUser(updatedUser);
-        showNotification("Webcam Scan Complete! Attendance Registered.", "success");
-        renderDashboard();
-    } else {
-        showNotification("Failed to save attendance in database.", "error");
-    }
-}
-
-
-let webcamStream = null;
-let scanAnimationFrameId = null;
-
-function startAttendanceScan() {
-    const video = document.getElementById('attendance-video');
-    const canvas = document.getElementById('attendance-canvas');
-    if (!video || !canvas) return;
-
-
-    document.getElementById('scan-init-view').classList.add('hidden');
-    document.getElementById('scan-active-view').classList.remove('hidden');
-
-    navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
-        .then(stream => {
-            webcamStream = stream;
-            video.srcObject = stream;
-            video.onloadedmetadata = () => {
-                video.play();
-                drawScanOverlay(video, canvas);
-            };
-        })
-        .catch(err => {
-            console.warn("Webcam access error, loading wireframe simulator:", err);
-            showNotification("Webcam blocked or unavailable. Running simulator.", "warning");
-
-            drawScanOverlay(null, canvas);
-        });
-}
-
-function stopAttendanceScan() {
-    const video = document.getElementById('attendance-video');
-    if (video) video.srcObject = null;
-
-    if (webcamStream) {
-        webcamStream.getTracks().forEach(track => track.stop());
-        webcamStream = null;
-    }
-    if (scanAnimationFrameId) {
-        cancelAnimationFrame(scanAnimationFrameId);
-        scanAnimationFrameId = null;
-    }
-
-    const initView = document.getElementById('scan-init-view');
-    const activeView = document.getElementById('scan-active-view');
-    if (initView) initView.classList.remove('hidden');
-    if (activeView) activeView.classList.add('hidden');
-}
-
-function drawScanOverlay(video, canvas) {
-    const ctx = canvas.getContext('2d');
-    let laserY = 20;
-    let laserDirection = 1;
-    let scanProgress = 0;
-    let targetLocked = false;
-
-    function renderLoop() {
-        if (!canvas) return;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-
-        if (video && video.readyState >= 2) {
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            ctx.fillStyle = 'rgba(13, 28, 50, 0.2)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-        } else {
-
-            ctx.fillStyle = '#0c0f10';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.strokeStyle = 'rgba(185, 199, 228, 0.2)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(canvas.width / 2, canvas.height / 2 - 30, 80, 0, Math.PI * 2);
-            ctx.moveTo(canvas.width / 2 - 40, canvas.height / 2 + 50);
-            ctx.bezierCurveTo(canvas.width / 2 - 100, canvas.height / 2 + 120, canvas.width / 2 - 120, canvas.height, canvas.width / 2 - 120, canvas.height);
-            ctx.moveTo(canvas.width / 2 + 40, canvas.height / 2 + 50);
-            ctx.bezierCurveTo(canvas.width / 2 + 100, canvas.height / 2 + 120, canvas.width / 2 + 120, canvas.height, canvas.width / 2 + 120, canvas.height);
-            ctx.stroke();
-
-            ctx.fillStyle = 'rgba(185, 199, 228, 0.4)';
-            ctx.font = '14px Manrope';
-            ctx.textAlign = 'center';
-            ctx.fillText("WEBCAM SIMULATOR ACTIVE", canvas.width / 2, canvas.height / 2 + 80);
-        }
-
-
-        const cx = canvas.width / 2;
-        const cy = canvas.height / 2;
-        const rSize = 120;
-
-        ctx.strokeStyle = targetLocked ? '#10b981' : '#e9c176';
-        ctx.lineWidth = 2;
-
-        // Corner brackets
-        // Top-left
-        ctx.beginPath(); ctx.moveTo(cx - rSize, cy - rSize + 30); ctx.lineTo(cx - rSize, cy - rSize); ctx.lineTo(cx - rSize + 30, cy - rSize); ctx.stroke();
-        // Top-right
-        ctx.beginPath(); ctx.moveTo(cx + rSize, cy - rSize + 30); ctx.lineTo(cx + rSize, cy - rSize); ctx.lineTo(cx + rSize - 30, cy - rSize); ctx.stroke();
-        // Bottom-left
-        ctx.beginPath(); ctx.moveTo(cx - rSize, cy + rSize - 30); ctx.lineTo(cx - rSize, cy + rSize); ctx.lineTo(cx - rSize + 30, cy + rSize); ctx.stroke();
-        // Bottom-right
-        ctx.beginPath(); ctx.moveTo(cx + rSize, cy + rSize - 30); ctx.lineTo(cx + rSize, cy + rSize); ctx.lineTo(cx + rSize - 30, cy + rSize); ctx.stroke();
-
-        // Target capture indicators
-        scanProgress += 0.8;
-        if (scanProgress > 100) scanProgress = 100;
-
-        if (scanProgress > 40) {
-            targetLocked = true;
-            ctx.fillStyle = 'rgba(16, 185, 129, 0.15)';
-            ctx.fillRect(cx - rSize, cy - rSize, rSize * 2, rSize * 2);
-
-            ctx.strokeStyle = '#10b981';
-            ctx.beginPath();
-            ctx.arc(cx, cy, 30, 0, Math.PI * 2);
-            ctx.stroke();
-
-            ctx.fillStyle = '#10b981';
-            ctx.font = 'bold 12px Manrope';
-            ctx.textAlign = 'center';
-            ctx.fillText("TARGET LOCK: MATCH 98.4%", cx, cy - rSize - 15);
-        } else {
-            ctx.fillStyle = '#e9c176';
-            ctx.font = 'bold 12px Manrope';
-            ctx.textAlign = 'center';
-            ctx.fillText("ACQUIRING BIOMETRIC PRINT...", cx, cy - rSize - 15);
-        }
-
-        // Draw laser scan line
-        laserY += laserDirection * 3;
-        if (laserY > cy + rSize || laserY < cy - rSize) {
-            laserDirection *= -1;
-        }
-
-        ctx.strokeStyle = targetLocked ? 'rgba(16, 185, 129, 0.8)' : 'rgba(233, 193, 118, 0.8)';
-        ctx.lineWidth = 3;
-        ctx.shadowColor = targetLocked ? '#10b981' : '#e9c176';
-        ctx.shadowBlur = 8;
-        ctx.beginPath();
-        ctx.moveTo(cx - rSize, laserY);
-        ctx.lineTo(cx + rSize, laserY);
-        ctx.stroke();
-
-        // Reset shadow
-        ctx.shadowBlur = 0;
-
-        // Draw progress bar
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-        ctx.fillRect(cx - rSize, cy + rSize + 20, rSize * 2, 8);
-        ctx.fillStyle = targetLocked ? '#10b981' : '#e9c176';
-        ctx.fillRect(cx - rSize, cy + rSize + 20, (rSize * 2) * (scanProgress / 100), 8);
-
-        if (scanProgress < 100) {
-            scanAnimationFrameId = requestAnimationFrame(renderLoop);
-        } else {
-            // Completed! Mark attendance and return
-            setTimeout(() => {
-                stopAttendanceScan();
-                markAttendanceForActiveUser();
-                navigateTo('dashboard');
-            }, 600);
-        }
-    }
-
-    renderLoop();
 }
 
 // Shared student progression/badge checks
 window.updateStudentProgression = function (student) {
-    if (student.role === 'teacher') return;
+
     if (!student.badges) student.badges = [];
 
     // 1500 points -> Intermediate
@@ -1089,6 +758,33 @@ window.updateStudentProgression = function (student) {
         student.category = "Grandmaster";
         showNotification("New Badge Earned: Legendary Grandmaster!", "success");
     }
+    // First Blood: Win 1 game
+    if (student.winCount >= 1 && !student.badges.includes("FirstBlood")) {
+        student.badges.push("FirstBlood");
+        showNotification("Achievement Unlocked: First Blood!", "success");
+    }
+    // Unstoppable: Win 3 games
+    if (student.winCount >= 3 && !student.badges.includes("Unstoppable")) {
+        student.badges.push("Unstoppable");
+        showNotification("Achievement Unlocked: Unstoppable!", "success");
+    }
+    // Invincible: Win 5 games
+    if (student.winCount >= 5 && !student.badges.includes("Invincible")) {
+        student.badges.push("Invincible");
+        showNotification("Achievement Unlocked: Invincible!", "success");
+    }
+    // Tactic Wizard: Solve 10 puzzles
+    const solvedCount = (student.solvedPuzzles || []).length;
+    if (solvedCount >= 10 && !student.badges.includes("TacticWizard")) {
+        student.badges.push("TacticWizard");
+        showNotification("Achievement Unlocked: Tactic Wizard!", "success");
+    }
+    // Puzzle Master: Solve 50 puzzles
+    if (solvedCount >= 50 && !student.badges.includes("PuzzleMaster")) {
+        student.badges.push("PuzzleMaster");
+        showNotification("Achievement Unlocked: Puzzle Master!", "success");
+    }
+
 
     // Set correct category based on points
     if (student.points < 1500) {
@@ -1277,7 +973,7 @@ function renderClassesTabs() {
             : "px-4 py-2 bg-surface-variant text-on-surface rounded-full text-xs font-semibold border border-outline-variant hover:bg-surface-variant/80 transition-all cursor-pointer inline-flex items-center";
 
         tabsContainer.innerHTML += `
-            <button onclick="filterClassesByDay('${escapeJSAttr(day)}')" class="${btnClass}">
+            <button data-action="filterClassesByDay" data-arg="${escapeJSAttr(day)}" class="${btnClass}">
                 ${escapeHTML(day)}${indicator}
             </button>
         `;
@@ -1405,9 +1101,7 @@ function renderClassesList() {
         let studentsHtml = '';
         cls.students.forEach(student => {
             studentsHtml += `
-                <span data-student-name="${escapeHTML(student)}" class="px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-variant/40 text-on-surface-variant border border-outline-variant/10 transition-all duration-200 inline-block">
-                    ${escapeHTML(student)}
-                </span>
+                <span data-student-name="${escapeHTML(student)}" class="hidden"></span>
             `;
         });
 
@@ -1430,7 +1124,7 @@ function renderClassesList() {
             }
         } else {
             buttonHtml = `
-                <button onclick="openLoginModal()"
+                <button data-action="openLoginModal"
                     class="w-full py-3 bg-secondary text-on-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/10 hover:shadow-secondary/20 rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-xs">
                     <span class="material-symbols-outlined text-sm">login</span> Sign in to Join Class
                 </button>
@@ -1465,10 +1159,11 @@ function renderClassesList() {
                     </p>
                     
                     <div class="mb-6">
-                        <span class="text-[10px] text-on-surface-variant block uppercase tracking-wider mb-2 font-bold">Enrolled Students (${cls.students.length})</span>
-                        <div class="flex flex-wrap gap-1.5">
-                            ${studentsHtml}
+                        <div class="flex items-center gap-2 text-xs font-semibold text-on-surface-variant bg-surface-container-high/40 px-3 py-1.5 rounded-xl border border-outline-variant/20 w-fit">
+                            <span class="material-symbols-outlined text-sm text-secondary">group</span>
+                            <span>Enrolled: ${cls.studentCount !== undefined ? cls.studentCount : cls.students.length} Students</span>
                         </div>
+                        ${studentsHtml}
                     </div>
                 </div>
                 
@@ -1479,6 +1174,27 @@ function renderClassesList() {
                     </div>
                     <div>
                         ${buttonHtml}
+                    </div>
+
+                    <!-- Recordings Panel -->
+                    <div class="mt-4 pt-4 border-t border-outline-variant/20">
+                        <button data-action="toggleRecordings" data-id="${cls.id}" class="w-full py-2 bg-surface-container-high hover:bg-surface-variant text-on-surface border border-outline-variant/30 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all">
+                            <span class="material-symbols-outlined text-sm">video_library</span> Class Recordings
+                        </button>
+                        <div id="recordings-container-${cls.id}" class="hidden mt-3 space-y-2 text-left">
+                            <div id="recordings-list-${cls.id}" class="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                                <span class="text-[10px] text-on-surface-variant italic">Loading recordings...</span>
+                            </div>
+                            <!-- Add Recording UI for Teachers -->
+                            <div id="add-recording-box-${cls.id}" class="hidden mt-3 p-3 rounded-xl bg-surface-container border border-outline-variant/30 flex flex-col gap-2">
+                                <span class="text-[10px] font-bold text-secondary uppercase tracking-wider">Add Class Recording</span>
+                                <input type="text" id="rec-title-${cls.id}" placeholder="Topic (e.g. Sicilian Defense)" class="bg-background border border-outline-variant/50 text-on-background text-[11px] rounded-lg px-2.5 py-1.5 w-full focus:outline-none focus:border-secondary transition-all">
+                                <input type="text" id="rec-url-${cls.id}" placeholder="Zoom/Drive Link" class="bg-background border border-outline-variant/50 text-on-background text-[11px] rounded-lg px-2.5 py-1.5 w-full focus:outline-none focus:border-secondary transition-all">
+                                <button data-action="saveClassRecording" data-id="${cls.id}" class="py-1.5 bg-secondary text-on-secondary rounded-lg text-[10px] font-bold hover:bg-secondary/90 transition-all">
+                                    Save Link
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1583,7 +1299,7 @@ function navigateTo(tabId, keepViewingUser = false) {
     url.searchParams.set('tab', tabId);
     window.history.replaceState({}, '', url);
 
-    const sections = ['landing-page', 'dashboard-page', 'attendance-page', 'chess-page', 'classes-page', 'leaderboard-page', 'puzzles-page', 'vision-trainer-page', 'openings-page', 'tournaments-page'];
+    const sections = ['landing-page', 'dashboard-page', 'chess-page', 'classes-page', 'leaderboard-page', 'puzzles-page', 'vision-trainer-page', 'openings-page', 'tournaments-page', 'endgame-trainer-page'];
     const targetSec = `${tabId}-page`;
 
     sections.forEach(sec => {
@@ -1604,6 +1320,10 @@ function navigateTo(tabId, keepViewingUser = false) {
             }
         }
     });
+
+    if (window.ScrollTrigger) {
+        ScrollTrigger.refresh();
+    }
 
     // Handle Active Styles in Navbar / Sidebar
     const navLinks = document.querySelectorAll('header a, nav a');
@@ -1627,11 +1347,7 @@ function navigateTo(tabId, keepViewingUser = false) {
     if (tabId === 'dashboard') renderDashboard();
     if (tabId === 'leaderboard') renderLeaderboard();
     if (tabId === 'chess') initChessGame();
-    if (tabId === 'teacher') {
-        renderTeacherStudentTable();
-        if (typeof window.loadTeacherAnalytics === 'function') window.loadTeacherAnalytics();
-        if (typeof window.initBroadcastDropdown === 'function') window.initBroadcastDropdown();
-    }
+
     if (tabId === 'puzzles') {
         if (typeof initPuzzleGame === 'function') {
             initPuzzleGame();
@@ -1647,6 +1363,11 @@ function navigateTo(tabId, keepViewingUser = false) {
             initOpeningsExplorer();
         }
     }
+    if (tabId === 'endgame-trainer') {
+        if (typeof initEndgameTrainer === 'function') {
+            initEndgameTrainer();
+        }
+    }
 
     if (tabId === 'classes') {
         autoSelectNextDayWithClasses();
@@ -1660,13 +1381,17 @@ function navigateTo(tabId, keepViewingUser = false) {
         }
     }
 
-    if (tabId === 'attendance') {
-        startAttendanceScan();
-    } else {
-        stopAttendanceScan();
+
+
+    if (tabId === 'tournaments') {
+        loadAcademyTournaments();
     }
 
-
+    if (tabId === 'dashboard') {
+        loadAnnouncements();
+        loadDailyPuzzle();
+        checkTeacherRole();
+    }
 
     // Scroll to top
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1674,9 +1399,14 @@ function navigateTo(tabId, keepViewingUser = false) {
 
 // Calculate ELO progression details
 function getEloProgress(points, role) {
-    if (role === 'teacher') {
-        return { levelName: "Legendary Grandmaster", progressPct: 100, footerText: "Teacher Account (Infinite ELO)" };
+    if (points === Infinity) {
+        return {
+            levelName: "Level 4 (Grandmaster)",
+            progressPct: 100,
+            footerText: "Elite Grandmaster status attained!"
+        };
     }
+
     let levelName = "Level 1";
     let progressPct = 0;
     let footerText = "";
@@ -1756,6 +1486,18 @@ function renderDashboard() {
         }
     }
 
+    const downloadBtn = document.getElementById('dash-download-report-btn');
+    if (downloadBtn) {
+        if (isSelf) downloadBtn.classList.remove('hidden');
+        else downloadBtn.classList.add('hidden');
+    }
+
+    const challengeBtn = document.getElementById('live-challenge-btn');
+    if (challengeBtn) {
+        if (isSelf) challengeBtn.classList.add('hidden');
+        else challengeBtn.classList.remove('hidden');
+    }
+
     const emailEl = document.getElementById('dash-user-email');
     if (emailEl) {
         if (isSelf && user.email) {
@@ -1767,24 +1509,17 @@ function renderDashboard() {
         }
     }
 
+    const isAdminUser = user.email && user.email.toLowerCase() === ADMIN_EMAIL;
+
     // Set user specific details in the Dashboard DOM
     document.getElementById('dash-user-name').innerText = user.name;
     document.getElementById('dash-user-avatar').src = user.avatar;
-    document.getElementById('dash-user-points').innerText = user.role === 'teacher' ? 'Infinite' : `${user.points} pts`;
-    document.getElementById('dash-user-rank').innerText = `#${getUserRank(user.id)}`;
-    document.getElementById('dash-user-category').innerText = user.role === 'teacher' ? 'Legendary Grandmaster' : user.category;
-    document.getElementById('dash-win-ratio').innerText = user.role === 'teacher' ? '100%' : `${user.gamesPlayed > 0 ? Math.round((user.winCount / user.gamesPlayed) * 100) : 0}% (${user.winCount}/${user.gamesPlayed})`;
+    document.getElementById('dash-user-points').innerText = isAdminUser ? '∞ Infinite' : `${user.points} pts`;
+    document.getElementById('dash-user-rank').innerText = isAdminUser ? 'Nil' : `#${getUserRank(user.id)}`;
+    document.getElementById('dash-user-category').innerText = user.category;
+    document.getElementById('dash-win-ratio').innerText = isAdminUser ? '100% (∞/∞)' : `${user.gamesPlayed > 0 ? Math.round((user.winCount / user.gamesPlayed) * 100) : 0}% (${user.winCount}/${user.gamesPlayed})`;
 
-    // Clear custom electric border from dashboard avatar
-    const avatarWrapper = document.getElementById('dash-user-avatar-wrapper');
-    if (avatarWrapper) {
-        avatarWrapper.classList.remove('electric-border');
-        if (avatarWrapper._electricBorderCleanup) {
-            avatarWrapper._electricBorderCleanup();
-            avatarWrapper._electricBorderCleanup = null;
-            avatarWrapper.dataset.electricBorderInitialized = 'false';
-        }
-    }
+
 
     // ELO progression calculation & dynamic widgets rendering
     const { levelName, progressPct, footerText } = getEloProgress(user.points, user.role);
@@ -1815,9 +1550,9 @@ function renderDashboard() {
     }
 
     // Win Ratio speedometer calculation & dynamic rendering
-    const ratioPct = user.gamesPlayed > 0 ? Math.round((user.winCount / user.gamesPlayed) * 100) : 0;
+    const ratioPct = isAdminUser ? 100 : (user.gamesPlayed > 0 ? Math.round((user.winCount / user.gamesPlayed) * 100) : 0);
     document.getElementById('dash-win-ratio-txt').innerText = `${ratioPct}%`;
-    document.getElementById('dash-win-ratio-footer').innerText = `Record: ${user.winCount} Wins / ${user.gamesPlayed - user.winCount} Losses`;
+    document.getElementById('dash-win-ratio-footer').innerText = isAdminUser ? 'Record: ∞ Wins / 0 Losses' : `Record: ${user.winCount} Wins / ${user.gamesPlayed - user.winCount} Losses`;
 
     const winGauge = document.getElementById('dash-win-gauge');
     if (winGauge) {
@@ -1844,9 +1579,12 @@ function renderDashboard() {
     // Renders attendance percentages (only available on own authenticated profile)
     const attendance = user.attendance || { attended: 0, total: 20, history: [] };
     const attPercent = attendance.total > 0 ? Math.round((attendance.attended / attendance.total) * 100) : 0;
-    document.getElementById('dash-attendance-stat').innerText = isSelf
-        ? `${attendance.attended} / ${attendance.total} (${attPercent}%)`
-        : '—';
+    const attStatEl = document.getElementById('dash-attendance-stat');
+    if (attStatEl) {
+        attStatEl.innerText = isSelf
+            ? `${attendance.attended} / ${attendance.total} (${attPercent}%)`
+            : '—';
+    }
 
     const attBar = document.getElementById('dash-attendance-bar');
     if (attBar) attBar.style.width = isSelf ? `${attPercent}%` : '0%';
@@ -1855,7 +1593,7 @@ function renderDashboard() {
     const badgeContainer = document.getElementById('dash-badges-container');
     if (badgeContainer) {
         badgeContainer.innerHTML = '';
-        const displayBadges = user.role === 'teacher' ? Object.keys(BADGES) : user.badges;
+        const displayBadges = user.badges || [];
         displayBadges.forEach(bId => {
             const b = BADGES[bId] || BADGES['Beginner'];
             badgeContainer.innerHTML += `
@@ -1902,7 +1640,7 @@ function renderDashboard() {
     const hwBlock = document.getElementById('student-homework-block');
     const coachBlock = document.getElementById('student-coaching-notes-block');
 
-    if (isSelf && user.role !== 'teacher') {
+    if (isSelf) {
         // Student self-view: show both cards and populate them
         if (hwBlock) hwBlock.classList.remove('hidden');
         if (coachBlock) coachBlock.classList.remove('hidden');
@@ -1914,6 +1652,20 @@ function renderDashboard() {
         if (hwBlock) hwBlock.classList.add('hidden');
         if (coachBlock) coachBlock.classList.add('hidden');
     }
+
+    // Hide daily puzzle block for admin account (they have no pending puzzles)
+    const dailyPuzzleBlock = document.getElementById('daily-puzzle-block');
+    if (dailyPuzzleBlock) {
+        if (isAdminUser) {
+            dailyPuzzleBlock.classList.add('hidden');
+        } else {
+            dailyPuzzleBlock.classList.remove('hidden');
+        }
+    }
+
+    // Render advanced tactics analytics
+    if (typeof renderTacticsHeatmap === 'function') renderTacticsHeatmap(user);
+    if (typeof renderTacticsRadarChart === 'function') renderTacticsRadarChart(user);
 }
 
 
@@ -1921,16 +1673,71 @@ function renderDashboard() {
 function getUserRank(studentId) {
     const students = getStudents();
     const student = students.find(s => s.id === studentId);
-    if (student && student.role === 'teacher') return '-';
-
-    const nonTeachers = students.filter(s => s.role !== 'teacher');
-    const idx = nonTeachers.findIndex(s => s.id === studentId);
+    if (student && student.email && student.email.toLowerCase() === ADMIN_EMAIL) {
+        return 'Nil';
+    }
+    const idx = students.findIndex(s => s.id === studentId);
     return idx !== -1 ? idx + 1 : '-';
 }
 
 // Renders the Leaderboard grid/table and dynamic Top 3 Podium
 function renderLeaderboard() {
-    const students = getStudents().filter(s => !s.role || s.role !== 'teacher');
+    const students = getStudents();
+
+    // Render birthday sections if any student has birthday today
+    const birthdayStudents = students.filter(s => s.isBirthdayToday);
+    const bdayContainer = document.getElementById('leaderboard-birthdays-container');
+    if (bdayContainer) {
+        if (birthdayStudents.length > 0) {
+            bdayContainer.classList.remove('hidden');
+            let bdayHtml = `
+                <div class="relative overflow-hidden rounded-3xl border border-secondary/30 bg-gradient-to-r from-secondary/10 via-surface-container/60 to-primary/5 p-6 shadow-xl">
+                    <div class="absolute inset-0 bg-gradient-to-br from-secondary/5 via-transparent to-primary/5 pointer-events-none"></div>
+                    <div class="relative z-10 flex flex-col gap-4">
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-secondary text-2xl">cake</span>
+                            <h4 class="font-display-lg text-lg font-extrabold text-on-surface">Academy Birthday Celebrations! 🎂</h4>
+                        </div>
+                        <div class="flex flex-col gap-3">
+            `;
+
+            const chessWishes = [
+                "May your ELO score soar and your center control be absolute! ♟️✨",
+                "Wishing you a year full of brilliant moves, dynamic sacrifices, and perfect endgames! 🏆✨",
+                "May you spot every tactical opportunity and execute flawless checkmates! 👑🌟",
+                "Wishing you tactical mastery, great calculations, and absolute domination on the 64 squares! ♟️🎉",
+                "Here's to a year of sharp openings, ironclad defense, and victorious checkmates! 🍰🥊"
+            ];
+
+            birthdayStudents.forEach((s, i) => {
+                const wishText = chessWishes[i % chessWishes.length];
+                bdayHtml += `
+                    <div class="flex items-center gap-4 bg-surface-container/50 border border-outline-variant/20 rounded-2xl p-4">
+                        <img class="w-12 h-12 rounded-xl object-cover border border-secondary/30" src="${safeUrl(s.avatar)}" data-seed="${escapeJSAttr(s.name)}" />
+                        <div class="text-left flex-1">
+                            <p class="text-sm font-bold text-on-surface">
+                                Wish you happy birthday, <span class="text-secondary">${escapeHTML(s.name)}</span>!
+                            </p>
+                            <p class="text-xs text-on-surface-variant leading-relaxed mt-1">
+                                ${wishText}
+                            </p>
+                        </div>
+                        <div class="text-3xl animate-bounce" style="animation-duration: 2s;">🎈</div>
+                    </div>
+                `;
+            });
+
+            bdayHtml += `
+                        </div>
+                    </div>
+                </div>
+            `;
+            bdayContainer.innerHTML = bdayHtml;
+        } else {
+            bdayContainer.classList.add('hidden');
+            bdayContainer.innerHTML = '';
+        }
+    }
 
     // Dynamic Top 3 Podium Rendering
     const p1 = document.getElementById('podium-rank-1');
@@ -1945,7 +1752,13 @@ function renderLeaderboard() {
             p1.onclick = () => window.viewStudentProfile(s1.id);
             p1.classList.add('cursor-pointer', 'transition-all', 'hover:scale-[1.03]');
             const img = p1.querySelector('img');
-            if (img) img.src = s1.avatar;
+            if (img) {
+                img.src = s1.avatar;
+                img.onerror = () => {
+                    img.onerror = null;
+                    img.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(s1.name)}`;
+                };
+            }
             const h4 = p1.querySelector('h4');
             if (h4) h4.innerHTML = `${escapeHTML(s1.name)} <span class="material-symbols-outlined text-secondary text-sm">verified</span>`;
             const idSpan = p1.querySelector('.text-on-surface-variant');
@@ -1966,7 +1779,13 @@ function renderLeaderboard() {
             p2.onclick = () => window.viewStudentProfile(s2.id);
             p2.classList.add('cursor-pointer', 'transition-all', 'hover:scale-[1.03]');
             const img = p2.querySelector('img');
-            if (img) img.src = s2.avatar;
+            if (img) {
+                img.src = s2.avatar;
+                img.onerror = () => {
+                    img.onerror = null;
+                    img.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(s2.name)}`;
+                };
+            }
             const h4 = p2.querySelector('h4');
             if (h4) h4.innerText = s2.name;
             const idSpan = p2.querySelector('.text-on-surface-variant');
@@ -1987,7 +1806,13 @@ function renderLeaderboard() {
             p3.onclick = () => window.viewStudentProfile(s3.id);
             p3.classList.add('cursor-pointer', 'transition-all', 'hover:scale-[1.03]');
             const img = p3.querySelector('img');
-            if (img) img.src = s3.avatar;
+            if (img) {
+                img.src = s3.avatar;
+                img.onerror = () => {
+                    img.onerror = null;
+                    img.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(s3.name)}`;
+                };
+            }
             const h4 = p3.querySelector('h4');
             if (h4) h4.innerText = s3.name;
             const idSpan = p3.querySelector('.text-on-surface-variant');
@@ -2030,16 +1855,7 @@ function renderLeaderboard() {
         }
     }
 
-    // Apply ElectricBorder animation for Top 3
-    if (students.length >= 1 && p1 && !p1.classList.contains('hidden')) {
-        createElectricBorder(p1, { color: '#7df9ff', speed: 1.2, chaos: 0.15, borderRadius: 16 });
-    }
-    if (students.length >= 2 && p2 && !p2.classList.contains('hidden')) {
-        createElectricBorder(p2, { color: '#7df9ff', speed: 1.0, chaos: 0.12, borderRadius: 16 });
-    }
-    if (students.length >= 3 && p3 && !p3.classList.contains('hidden')) {
-        createElectricBorder(p3, { color: '#7df9ff', speed: 0.8, chaos: 0.10, borderRadius: 16 });
-    }
+
 
     // Table rows rendering
     const container = document.getElementById('leaderboard-rows');
@@ -2079,11 +1895,11 @@ function renderLeaderboard() {
         }
 
         container.innerHTML += `
-            <tr class="${rowClass}" onclick="window.viewStudentProfile('${escapeJSAttr(student.id)}')">
+            <tr class="${rowClass}" data-action="viewStudentProfile" data-arg="${escapeJSAttr(student.id)}">
                 <td class="px-6 py-4 whitespace-nowrap text-center text-body-md font-bold">${rankBadge}</td>
                 <td class="px-6 py-4 whitespace-nowrap">
                     <div class="flex items-center gap-3">
-                        <img class="w-10 h-10 rounded-lg bg-surface-variant object-cover border border-outline-variant/30" src="${safeUrl(student.avatar)}" />
+                        <img class="w-10 h-10 rounded-lg bg-surface-variant object-cover border border-outline-variant/30" src="${safeUrl(student.avatar)}" data-seed="${escapeJSAttr(student.name)}" />
                         <div class="flex flex-col">
                             <span class="text-body-md text-on-surface font-semibold flex items-center gap-1.5">
                                 ${escapeHTML(student.name)} ${isSelf ? '<span class="text-xs bg-secondary/20 text-secondary px-2 py-0.5 rounded-full">You</span>' : ''}
@@ -2105,6 +1921,57 @@ function renderLeaderboard() {
             </tr>
         `;
     });
+
+    // Scorecard Birthday Popup Logic
+    const currentUser = getCurrentUser();
+    if (currentUser && currentUser.dob) {
+        try {
+            const today = new Date();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(today.getDate()).padStart(2, '0');
+            const todayMonthDay = `${month}-${day}`;
+            const dobParts = currentUser.dob.split('-');
+            if (dobParts.length === 3) {
+                const dobMonthDay = `${dobParts[1]}-${dobParts[2]}`;
+                if (dobMonthDay === todayMonthDay) {
+                    if (!window.scorecardBirthdayShown) {
+                        window.scorecardBirthdayShown = true;
+                        showScorecardBirthdayPopup(currentUser.name);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("Scorecard birthday check failed:", e);
+        }
+    }
+}
+
+// Helper to render Scorecard Birthday Popup Modal
+function showScorecardBirthdayPopup(username) {
+    const modal = document.createElement('div');
+    modal.id = 'scorecard-birthday-modal';
+    modal.className = 'fixed inset-0 z-[99999] flex items-center justify-center bg-black/80 backdrop-blur-md p-4';
+    modal.innerHTML = `
+        <div class="w-full max-w-md bg-surface-container rounded-3xl border border-secondary/50 p-8 flex flex-col gap-6 shadow-2xl relative text-center items-center justify-center glass-card">
+            <button data-action="removeParentCard" class="absolute top-4 right-4 text-on-surface-variant hover:text-on-surface cursor-pointer">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+            <div class="w-20 h-20 bg-secondary/15 rounded-full flex items-center justify-center mb-2 text-5xl animate-bounce">
+                🎉
+            </div>
+            <div>
+                <span class="text-secondary font-bold text-xs uppercase tracking-widest block mb-2">Today's Birthday 🎂</span>
+                <h3 class="font-display-lg text-2xl font-extrabold text-on-surface">This student birthday is today!</h3>
+                <p class="text-body-md text-on-surface-variant mt-3 leading-relaxed">
+                    Wish you happy birthday, <span class="font-extrabold text-secondary">${escapeHTML(username)}</span>! 🎈🏆
+                </p>
+            </div>
+            <button data-action="removeParentCard" class="w-full py-4 bg-secondary text-on-secondary font-bold rounded-2xl text-sm hover:scale-105 duration-200 transition-all shadow-lg shadow-secondary/15 mt-2 cursor-pointer">
+                Awesome, Thank You!
+            </button>
+        </div>
+    `;
+    document.body.appendChild(modal);
 }
 
 // Update Navbar buttons based on Auth State
@@ -2135,30 +2002,21 @@ function updateAuthUI() {
         // Show Dashboard and Chess Arena links
         if (headerNav) {
             headerNav.innerHTML = `
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('landing')">Academy</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('dashboard')">Dashboard</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('chess')">Arena</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('puzzles')">Puzzles</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('vision-trainer')">Vision</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('openings')">Openings</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('classes')">Classes</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('tournaments')">Tournaments</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('leaderboard')">Leaderboard</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="landing">Academy</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="dashboard">Dashboard</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="chess">Arena</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="puzzles">Puzzles</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="vision-trainer">Vision</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="openings">Openings</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="classes">Classes</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="tournaments">Tournaments</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="leaderboard">Leaderboard</a>
             `;
         }
 
 
 
-        // Toggle teacher-only elements
-        const teacherNavbarBtn = document.getElementById('navbar-teacher-btn');
-        const teacherSidebarBtn = document.getElementById('sidebar-teacher-btn');
-        if (user.role === 'teacher') {
-            if (teacherNavbarBtn) teacherNavbarBtn.classList.remove('hidden');
-            if (teacherSidebarBtn) teacherSidebarBtn.classList.remove('hidden');
-        } else {
-            if (teacherNavbarBtn) teacherNavbarBtn.classList.add('hidden');
-            if (teacherSidebarBtn) teacherSidebarBtn.classList.add('hidden');
-        }
+
 
         authElements.forEach(el => el.classList.remove('hidden'));
         guestElements.forEach(el => el.classList.add('hidden'));
@@ -2166,11 +2024,7 @@ function updateAuthUI() {
             checkBirthdayWishFlow();
         }
     } else {
-        // Hide teacher elements on logout
-        const teacherNavbarBtn = document.getElementById('navbar-teacher-btn');
-        const teacherSidebarBtn = document.getElementById('sidebar-teacher-btn');
-        if (teacherNavbarBtn) teacherNavbarBtn.classList.add('hidden');
-        if (teacherSidebarBtn) teacherSidebarBtn.classList.add('hidden');
+
 
         // Unauthenticated State
         if (loginBtn) loginBtn.classList.remove('hidden');
@@ -2180,13 +2034,13 @@ function updateAuthUI() {
 
         if (headerNav) {
             headerNav.innerHTML = `
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('landing')">Academy</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('puzzles')">Puzzles</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('vision-trainer')">Vision</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('openings')">Openings</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('classes')">Classes</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('tournaments')">Tournaments</a>
-                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" onclick="navigateTo('leaderboard')">Leaderboard</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="landing">Academy</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="puzzles">Puzzles</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="vision-trainer">Vision</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="openings">Openings</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="classes">Classes</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="tournaments">Tournaments</a>
+                <a class="font-body-md text-on-surface-variant transition-all hover:text-secondary cursor-pointer" data-nav="leaderboard">Leaderboard</a>
             `;
         }
 
@@ -2240,7 +2094,7 @@ async function checkBirthdayWishFlow() {
                 // Trigger birthday greeting modal
                 document.getElementById('birthday-title').innerText = `Wish you happy birthday, ${user.name}!`;
                 document.getElementById('birthday-wish-modal').classList.remove('hidden');
-                showNotification("Happy Birthday! +1,000 points rewarded!", "success");
+                showNotification(`Wish you happy birthday, ${user.name}! You received 1000 points.`, "success");
             }
         }
     } catch (err) {
@@ -2279,7 +2133,7 @@ window.submitDob = async function () {
         if (rewarded) {
             document.getElementById('birthday-title').innerText = `Wish you happy birthday, ${user.name}!`;
             document.getElementById('birthday-wish-modal').classList.remove('hidden');
-            showNotification("Happy Birthday! +1,000 points rewarded!", "success");
+            showNotification(`Wish you happy birthday, ${user.name}! You received 1000 points.`, "success");
         }
     } else {
         showNotification("Failed to update date of birth. Try again.", "error");
@@ -2310,7 +2164,18 @@ async function logoutUser() {
 // Visual Notification alerts
 function showNotification(msg, type = "success") {
     const alertBox = document.createElement('div');
-    alertBox.className = `fixed bottom-6 right-6 z-50 flex items-center gap-3 px-6 py-4 rounded-xl border shadow-xl transform translate-y-10 opacity-0 transition-all duration-300 glass-card`;
+    alertBox.className = `flex items-center gap-3 px-6 py-4 rounded-xl border shadow-xl glass-card`;
+
+    // Direct inline styles to avoid Tailwind JIT compilation/purging issues
+    alertBox.style.position = 'fixed';
+    alertBox.style.top = '24px';
+    alertBox.style.left = '50%';
+    alertBox.style.transform = 'translateX(-50%) translateY(-40px)';
+    alertBox.style.opacity = '0';
+    alertBox.style.zIndex = '999999';
+    alertBox.style.width = '92%';
+    alertBox.style.maxWidth = '440px';
+    alertBox.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease';
 
     let icon = 'info';
     let iconColor = 'text-primary';
@@ -2331,19 +2196,21 @@ function showNotification(msg, type = "success") {
 
     alertBox.innerHTML = `
         <span class="material-symbols-outlined ${iconColor}">${icon}</span>
-        <span class="text-body-md text-on-background font-semibold">${msg}</span>
+        <span class="text-body-md text-on-background font-semibold text-center w-full">${msg}</span>
     `;
 
     document.body.appendChild(alertBox);
 
     // Animate in
     setTimeout(() => {
-        alertBox.classList.remove('translate-y-10', 'opacity-0');
+        alertBox.style.transform = 'translateX(-50%) translateY(0)';
+        alertBox.style.opacity = '1';
     }, 10);
 
     // Animate out and remove
     setTimeout(() => {
-        alertBox.classList.add('translate-y-10', 'opacity-0');
+        alertBox.style.transform = 'translateX(-50%) translateY(-40px)';
+        alertBox.style.opacity = '0';
         setTimeout(() => alertBox.remove(), 300);
     }, 4000);
 }
@@ -2395,6 +2262,7 @@ async function fetchGoogleClientId() {
         const res = await fetch('/api/config');
         if (!res.ok) return '';
         const data = await res.json();
+        window.isProduction = data.isProduction || false;
         return data.googleClientId || '';
     } catch (e) {
         console.warn('Failed to load Google OAuth config from server:', e);
@@ -2419,8 +2287,8 @@ function initPrivacyControls() {
                 </p>
             </div>
             <div class="flex gap-2 shrink-0">
-                <button onclick="window.showPrivacyModal()" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg border border-outline-variant/30 hover:bg-surface-variant/30 transition-colors cursor-pointer text-on-surface">Learn More</button>
-                <button onclick="window.acceptCookieConsent()" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-secondary text-on-secondary hover:opacity-90 shadow-md transition-opacity cursor-pointer">Accept Cookies</button>
+                <button data-action="showPrivacyModal" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg border border-outline-variant/30 hover:bg-surface-variant/30 transition-colors cursor-pointer text-on-surface">Learn More</button>
+                <button data-action="acceptCookieConsent" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-secondary text-on-secondary hover:opacity-90 shadow-md transition-opacity cursor-pointer">Accept Cookies</button>
             </div>
         `;
         document.body.appendChild(banner);
@@ -2436,7 +2304,7 @@ function initPrivacyControls() {
                 <h3 class="text-lg font-bold text-secondary flex items-center gap-2">
                     <span class="material-symbols-outlined">gavel</span> Privacy Policy & Cookie Statement
                 </h3>
-                <button onclick="window.hidePrivacyModal()" class="text-on-surface-variant hover:text-on-surface text-xl font-bold cursor-pointer">×</button>
+                <button data-action="hidePrivacyModal" class="text-on-surface-variant hover:text-on-surface text-xl font-bold cursor-pointer">×</button>
             </div>
             <div class="px-6 py-6 overflow-y-auto text-left text-sm text-on-surface-variant space-y-4">
                 <div>
@@ -2464,7 +2332,7 @@ function initPrivacyControls() {
                 </div>
             </div>
             <div class="px-6 py-4 border-t border-outline-variant/20 flex justify-end shrink-0">
-                <button onclick="window.hidePrivacyModal()" class="px-4 py-2 text-xs font-semibold rounded-lg bg-secondary text-on-secondary hover:opacity-90 transition-opacity cursor-pointer">Close Policy</button>
+                <button data-action="hidePrivacyModal" class="px-4 py-2 text-xs font-semibold rounded-lg bg-secondary text-on-secondary hover:opacity-90 transition-opacity cursor-pointer">Close Policy</button>
             </div>
         </div>
     `;
@@ -2480,7 +2348,7 @@ function initPrivacyControls() {
                 <h3 class="text-lg font-bold text-red-400 flex items-center gap-2">
                     <span class="material-symbols-outlined">delete_forever</span> Account Data Deletion
                 </h3>
-                <button onclick="window.hideDataDeletionModal()" class="text-on-surface-variant hover:text-on-surface text-xl font-bold cursor-pointer">×</button>
+                <button data-action="hideDataDeletionModal" class="text-on-surface-variant hover:text-on-surface text-xl font-bold cursor-pointer">×</button>
             </div>
             <div class="px-6 py-6 text-left text-sm text-on-surface-variant space-y-3" id="data-deletion-body">
                 <!-- Will be dynamically populated based on Auth State -->
@@ -2529,8 +2397,8 @@ window.showDataDeletionModal = function () {
             </p>
         `;
         actions.innerHTML = `
-            <button onclick="window.hideDataDeletionModal()" class="px-4 py-2 text-xs font-semibold rounded-lg border border-outline-variant/30 hover:bg-surface-variant/30 transition-colors cursor-pointer text-on-surface">Cancel</button>
-            <button onclick="window.requestDataDeletion('${escapeJSAttr(user.id)}')" class="px-4 py-2 text-xs font-semibold rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer">Confirm Deletion</button>
+            <button data-action="hideDataDeletionModal" class="px-4 py-2 text-xs font-semibold rounded-lg border border-outline-variant/30 hover:bg-surface-variant/30 transition-colors cursor-pointer text-on-surface">Cancel</button>
+            <button data-action="requestDataDeletion" data-id="${escapeJSAttr(user.id)}" class="px-4 py-2 text-xs font-semibold rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer">Confirm Deletion</button>
         `;
     } else {
         body.innerHTML = `
@@ -2539,7 +2407,7 @@ window.showDataDeletionModal = function () {
             </p>
         `;
         actions.innerHTML = `
-            <button onclick="window.hideDataDeletionModal()" class="px-4 py-2 text-xs font-semibold rounded-lg bg-secondary text-on-secondary hover:opacity-90 transition-opacity cursor-pointer">Close</button>
+            <button data-action="hideDataDeletionModal" class="px-4 py-2 text-xs font-semibold rounded-lg bg-secondary text-on-secondary hover:opacity-90 transition-opacity cursor-pointer">Close</button>
         `;
     }
 
@@ -2592,25 +2460,49 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const googleClientId = await fetchGoogleClientId();
     window.googleClientId = googleClientId;
+
+
+
     if (!googleClientId) {
         console.error('Google Sign-In is not configured. Set GOOGLE_CLIENT_ID in the server .env file and restart.');
+        const container = document.getElementById('google-login-btn-modal');
+        if (container) {
+            container.innerHTML = `
+                <div class="text-xs text-error p-3 border border-error/25 bg-error/5 rounded-xl flex items-center justify-center gap-2 max-w-xs mx-auto">
+                    <span class="material-symbols-outlined text-sm font-bold">error</span>
+                    <span>Google auth is not configured. ${window.isProduction ? '' : 'Use direct login below.'}</span>
+                </div>
+            `;
+        }
     }
 
     // Wait for Google script to load, then initialize (with polling fallback)
     function tryInitGoogle() {
-        if (window.google && window.google.accounts) {
+        if (window.google && window.google.accounts && googleClientId) {
             initGoogleAuth(googleClientId);
             return true;
         }
         return false;
     }
 
-    if (!tryInitGoogle()) {
+    if (!tryInitGoogle() && googleClientId) {
         let checkCount = 0;
         const googleAuthInterval = setInterval(() => {
             checkCount++;
-            if (tryInitGoogle() || checkCount > 20) {
+            if (tryInitGoogle()) {
                 clearInterval(googleAuthInterval);
+            } else if (checkCount > 20) {
+                clearInterval(googleAuthInterval);
+                console.warn('Google Identity script failed to load.');
+                const container = document.getElementById('google-login-btn-modal');
+                if (container && (!window.google || !window.google.accounts)) {
+                    container.innerHTML = `
+                        <div class="text-xs text-error p-3 border border-error/25 bg-error/5 rounded-xl flex items-center justify-center gap-2 max-w-xs mx-auto">
+                            <span class="material-symbols-outlined text-sm font-bold">warning</span>
+                            <span>Google Sign-In is unavailable. ${window.isProduction ? 'Please check your connection/ad-blocker.' : 'Use direct login below.'}</span>
+                        </div>
+                    `;
+                }
             }
         }, 250);
     }
@@ -2802,739 +2694,54 @@ window.closeSidebar = function () {
     }
 };
 
-// ==============================================
-// ElectricBorder Component Helper (Vanilla JS)
-// ==============================================
-function createElectricBorder(element, options = {}) {
-    if (!element) return;
-
-    const color = options.color || '#5227FF';
-    const speed = options.speed !== undefined ? options.speed : 1;
-    const chaos = options.chaos !== undefined ? options.chaos : 0.12;
-    const borderRadius = options.borderRadius !== undefined ? options.borderRadius : 24;
-
-    function hexToRgba(hex, alpha) {
-        hex = hex.replace('#', '');
-        if (hex.length === 3) {
-            hex = hex.split('').map(c => c + c).join('');
+window.openSidebar = function () {
+    const sidebar = document.querySelector('nav');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (sidebar && sidebar.classList.contains('-translate-x-full')) {
+        if (backdrop) {
+            backdrop.classList.remove('hidden');
+            backdrop.offsetHeight; // force reflow
+            backdrop.classList.remove('opacity-0');
+            backdrop.classList.add('opacity-100');
         }
-        const r = parseInt(hex.substring(0, 2), 16);
-        const g = parseInt(hex.substring(2, 4), 16);
-        const b = parseInt(hex.substring(4, 6), 16);
-        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        sidebar.classList.remove('-translate-x-full');
+        sidebar.classList.add('translate-x-0');
     }
+};
 
-    if (element.dataset.electricBorderInitialized === 'true') {
-        // Restore class if overridden by renderLeaderboard
-        element.classList.add('electric-border');
-        element.style.setProperty('--electric-border-color', color);
-        element.style.setProperty('--electric-border-glow-1', hexToRgba(color, 0.6));
-        element.style.setProperty('--electric-border-glow-2', color);
-        return;
-    }
-    element.dataset.electricBorderInitialized = 'true';
+// Touch gestures swipe sidebar
+(function initTouchGestures() {
+    let startX = 0;
+    let startY = 0;
 
-    // Set custom CSS variables on the element
-    element.classList.add('electric-border');
-    element.style.setProperty('--electric-border-color', color);
-    element.style.setProperty('--electric-border-glow-1', hexToRgba(color, 0.6));
-    element.style.setProperty('--electric-border-glow-2', color);
-    element.style.borderRadius = `${borderRadius}px`;
+    document.addEventListener('touchstart', e => {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+    }, { passive: true });
 
-    let contentWrapper = element.querySelector('.eb-content');
-    let canvasContainer, canvas, layers;
+    document.addEventListener('touchend', e => {
+        const endX = e.changedTouches[0].clientX;
+        const endY = e.changedTouches[0].clientY;
 
-    if (!contentWrapper) {
-        // 1. Move all existing children of element into a new wrapper div (.eb-content)
-        contentWrapper = document.createElement('div');
-        contentWrapper.className = 'eb-content';
-        while (element.firstChild) {
-            contentWrapper.appendChild(element.firstChild);
-        }
+        const diffX = endX - startX;
+        const diffY = endY - startY;
 
-        // 2. Create canvas elements
-        canvasContainer = document.createElement('div');
-        canvasContainer.className = 'eb-canvas-container';
-        canvas = document.createElement('canvas');
-        canvas.className = 'eb-canvas';
-        canvasContainer.appendChild(canvas);
-
-        // 3. Create glow layers
-        layers = document.createElement('div');
-        layers.className = 'eb-layers';
-        const glow1 = document.createElement('div');
-        glow1.className = 'eb-glow-1';
-        const glow2 = document.createElement('div');
-        glow2.className = 'eb-glow-2';
-        const bgGlow = document.createElement('div');
-        bgGlow.className = 'eb-background-glow';
-        layers.appendChild(glow1);
-        layers.appendChild(glow2);
-        layers.appendChild(bgGlow);
-
-        // 4. Append canvas container, layers, and content wrapper
-        element.appendChild(canvasContainer);
-        element.appendChild(layers);
-        element.appendChild(contentWrapper);
-    } else {
-        canvasContainer = element.querySelector('.eb-canvas-container');
-        canvas = element.querySelector('.eb-canvas');
-        layers = element.querySelector('.eb-layers');
-    }
-
-    // Animation variables
-    let animationFrameId = null;
-    let time = 0;
-    let lastFrameTime = 0;
-
-    const ctx = canvas.getContext('2d');
-
-    // Noise functions
-    function random(x) {
-        return (Math.sin(x * 12.9898) * 43758.5453) % 1;
-    }
-
-    // 2D Perlin Noise simulation
-    function noise2D(x, y) {
-        const i = Math.floor(x);
-        const j = Math.floor(y);
-        const fx = x - i;
-        const fy = y - j;
-
-        const a = random(i + j * 57);
-        const b = random(i + 1 + j * 57);
-        const c = random(i + (j + 1) * 57);
-        const d = random(i + 1 + (j + 1) * 57);
-
-        const ux = fx * fx * (3.0 - 2.0 * fx);
-        const uy = fy * fy * (3.0 - 2.0 * fy);
-
-        return a * (1 - ux) * (1 - uy) + b * ux * (1 - uy) + c * (1 - ux) * uy + d * ux * uy;
-    }
-
-    function octavedNoise(x, octaves, lacunarity, gain, baseAmplitude, baseFrequency, time, seed, baseFlatness) {
-        let y = 0;
-        let amplitude = baseAmplitude;
-        let frequency = baseFrequency;
-
-        for (let i = 0; i < octaves; i++) {
-            let octaveAmplitude = amplitude;
-            if (i === 0) {
-                octaveAmplitude *= baseFlatness;
+        // Check if movement is horizontal
+        if (Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+            // Swipe right: open if started near left edge (startX < 60)
+            if (diffX > 75 && startX < 60) {
+                window.openSidebar();
             }
-            y += octaveAmplitude * noise2D(frequency * x + seed * 100, time * frequency * 0.3);
-            frequency *= lacunarity;
-            amplitude *= gain;
-        }
-
-        return y;
-    }
-
-    function getCornerPoint(centerX, centerY, radius, startAngle, arcLength, progress) {
-        const angle = startAngle + progress * arcLength;
-        return {
-            x: centerX + radius * Math.cos(angle),
-            y: centerY + radius * Math.sin(angle)
-        };
-    }
-
-    function getRoundedRectPoint(t, left, top, width, height, radius) {
-        const straightWidth = width - 2 * radius;
-        const straightHeight = height - 2 * radius;
-        const cornerArc = (Math.PI * radius) / 2;
-        const totalPerimeter = 2 * straightWidth + 2 * straightHeight + 4 * cornerArc;
-        const distance = t * totalPerimeter;
-
-        let accumulated = 0;
-
-        // Top edge
-        if (distance <= accumulated + straightWidth) {
-            const progress = (distance - accumulated) / straightWidth;
-            return { x: left + radius + progress * straightWidth, y: top };
-        }
-        accumulated += straightWidth;
-
-        // Top-right corner
-        if (distance <= accumulated + cornerArc) {
-            const progress = (distance - accumulated) / cornerArc;
-            return getCornerPoint(left + width - radius, top + radius, radius, -Math.PI / 2, Math.PI / 2, progress);
-        }
-        accumulated += cornerArc;
-
-        // Right edge
-        if (distance <= accumulated + straightHeight) {
-            const progress = (distance - accumulated) / straightHeight;
-            return { x: left + width, y: top + radius + progress * straightHeight };
-        }
-        accumulated += straightHeight;
-
-        // Bottom-right corner
-        if (distance <= accumulated + cornerArc) {
-            const progress = (distance - accumulated) / cornerArc;
-            return getCornerPoint(left + width - radius, top + height - radius, radius, 0, Math.PI / 2, progress);
-        }
-        accumulated += cornerArc;
-
-        // Bottom edge
-        if (distance <= accumulated + straightWidth) {
-            const progress = (distance - accumulated) / straightWidth;
-            return { x: left + width - radius - progress * straightWidth, y: top + height };
-        }
-        accumulated += straightWidth;
-
-        // Bottom-left corner
-        if (distance <= accumulated + cornerArc) {
-            const progress = (distance - accumulated) / cornerArc;
-            return getCornerPoint(left + radius, top + height - radius, radius, Math.PI / 2, Math.PI / 2, progress);
-        }
-        accumulated += cornerArc;
-
-        // Left edge
-        if (distance <= accumulated + straightHeight) {
-            const progress = (distance - accumulated) / straightHeight;
-            return { x: left, y: top + height - radius - progress * straightHeight };
-        }
-        accumulated += straightHeight;
-
-        // Top-left corner
-        const progress = (distance - accumulated) / cornerArc;
-        return getCornerPoint(left + radius, top + radius, radius, Math.PI, Math.PI / 2, progress);
-    }
-
-    const octaves = 10;
-    const lacunarity = 1.6;
-    const gain = 0.7;
-    const amplitude = chaos;
-    const frequency = 10;
-    const baseFlatness = 0;
-    const displacement = 60;
-    const borderOffset = 60;
-
-    let width = 0;
-    let height = 0;
-
-    function updateSize() {
-        if (!element || !canvas) return { width: 0, height: 0 };
-        const rect = element.getBoundingClientRect();
-        width = rect.width + borderOffset * 2;
-        height = rect.height + borderOffset * 2;
-
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        canvas.width = width * dpr;
-        canvas.height = height * dpr;
-        canvas.style.width = `${width}px`;
-        canvas.style.height = `${height}px`;
-        if (ctx) {
-            ctx.scale(dpr, dpr);
-        }
-        return { width, height };
-    }
-
-    updateSize();
-    let lastDpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    function drawElectricBorder(currentTime) {
-        if (!canvas || !ctx || !element) return;
-
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        if (dpr !== lastDpr) {
-            lastDpr = dpr;
-            updateSize();
-        }
-
-        const deltaTime = lastFrameTime === 0 ? 0 : (currentTime - lastFrameTime) / 1000;
-        if (deltaTime > 0 && deltaTime < 0.5) {
-            time += deltaTime * speed;
-        }
-        lastFrameTime = currentTime;
-
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.scale(dpr, dpr);
-
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        const scale = displacement;
-        const left = borderOffset;
-        const top = borderOffset;
-        const borderWidth = width - 2 * borderOffset;
-        const borderHeight = height - 2 * borderOffset;
-        const maxRadius = Math.min(borderWidth, borderHeight) / 2;
-        const radius = Math.min(borderRadius, maxRadius);
-
-        const approximatePerimeter = 2 * (borderWidth + borderHeight) + 2 * Math.PI * radius;
-        const sampleCount = Math.floor(approximatePerimeter / 2);
-
-        ctx.beginPath();
-
-        for (let i = 0; i <= sampleCount; i++) {
-            const progress = i / sampleCount;
-
-            const point = getRoundedRectPoint(progress, left, top, borderWidth, borderHeight, radius);
-
-            const xNoise = octavedNoise(
-                progress * 8,
-                octaves,
-                lacunarity,
-                gain,
-                amplitude,
-                frequency,
-                time,
-                0,
-                baseFlatness
-            );
-
-            const yNoise = octavedNoise(
-                progress * 8,
-                octaves,
-                lacunarity,
-                gain,
-                amplitude,
-                frequency,
-                time,
-                1,
-                baseFlatness
-            );
-
-            const displacedX = point.x + xNoise * scale;
-            const displacedY = point.y + yNoise * scale;
-
-            if (i === 0) {
-                ctx.moveTo(displacedX, displacedY);
-            } else {
-                ctx.lineTo(displacedX, displacedY);
+            // Swipe left: close
+            if (diffX < -75) {
+                window.closeSidebar();
             }
         }
-
-        ctx.closePath();
-        ctx.stroke();
-
-        animationFrameId = requestAnimationFrame(drawElectricBorder);
-    }
-
-    const resizeObserver = new ResizeObserver(() => {
-        updateSize();
-    });
-    resizeObserver.observe(element);
-
-    animationFrameId = requestAnimationFrame(drawElectricBorder);
-
-    element._electricBorderCleanup = () => {
-        if (animationFrameId) {
-            cancelAnimationFrame(animationFrameId);
-        }
-        resizeObserver.disconnect();
-    };
-}
-
-// ==============================================
-// TEACHER CONTROL PANEL ACTIONS & HANDLERS
-// ==============================================
-
-window.activeTeacherManageStudentId = null;
-
-window.renderTeacherStudentTable = function (filterText = '') {
-    const container = document.getElementById('teacher-student-rows');
-    if (!container) return;
-    container.innerHTML = '';
-
-    const students = getStudents();
-    const filtered = students.filter(student => {
-        const nameMatch = student.name && student.name.toLowerCase().includes(filterText.toLowerCase());
-        const emailMatch = student.email && student.email.toLowerCase().includes(filterText.toLowerCase());
-        const idMatch = student.id && student.id.toLowerCase().includes(filterText.toLowerCase());
-        return nameMatch || emailMatch || idMatch;
-    });
-
-    filtered.forEach(student => {
-        // Render badge icons
-        let badgeIcons = '';
-        if (student.badges && Array.isArray(student.badges)) {
-            student.badges.forEach(bId => {
-                const b = BADGES[bId];
-                if (b) {
-                    badgeIcons += `<span class="material-symbols-outlined text-xs px-1.5 py-0.5 rounded bg-surface-container border border-outline-variant/30 text-on-surface-variant cursor-help" title="${escapeHTML(b.name)}: ${escapeHTML(b.desc)}">${escapeHTML(b.icon)}</span> `;
-                }
-            });
-        }
-
-        container.innerHTML += `
-            <tr class="hover:bg-surface-variant/30 border-b border-outline-variant/20">
-                <td class="px-6 py-4 whitespace-nowrap text-xs font-mono text-on-surface-variant">${escapeHTML(student.id)}</td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="flex items-center gap-3">
-                        <img class="w-8 h-8 rounded-lg bg-surface-variant object-cover border border-outline-variant/30" src="${safeUrl(student.avatar) || 'images/default-avatar.png'}" />
-                        <span class="text-xs text-on-surface font-semibold">${escapeHTML(student.name)}</span>
-                    </div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-xs text-on-surface-variant">${escapeHTML(student.email || 'N/A')}</td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-surface-container-high text-primary border border-outline-variant/20">${escapeHTML(student.category)}</span>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-center text-xs font-semibold text-secondary">${escapeHTML(student.points)} pts</td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="flex items-center gap-1 flex-wrap">
-                        ${badgeIcons || '<span class="text-[10px] text-on-surface-variant/40">None</span>'}
-                    </div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-center">
-                    <button onclick="window.openTeacherManageModal('${escapeJSAttr(student.id)}')" class="px-3 py-1.5 bg-primary text-on-primary hover:bg-primary/90 text-xs font-bold rounded-xl transition-all cursor-pointer">
-                        Manage
-                    </button>
-                </td>
-            </tr>
-        `;
-    });
-};
-
-window.filterTeacherStudents = function () {
-    const input = document.getElementById('teacher-student-search');
-    const val = input ? input.value : '';
-    window.renderTeacherStudentTable(val);
-};
-
-window.openTeacherManageModal = async function (studentId) {
-    window.activeTeacherManageStudentId = studentId;
-    const student = getStudents().find(s => s.id === studentId);
-    if (!student) {
-        showNotification("Student profile not found", "error");
-        return;
-    }
-
-    // Set subtitle
-    const subtitle = document.getElementById('teacher-manage-subtitle');
-    if (subtitle) subtitle.innerText = `${student.id} | ${student.name}`;
-
-    // Set points input value
-    const pointsInput = document.getElementById('teacher-manage-points');
-    if (pointsInput) pointsInput.value = student.points;
-
-    // Populate badges checkboxes
-    const badgesContainer = document.getElementById('teacher-manage-badges-container');
-    if (badgesContainer) {
-        badgesContainer.innerHTML = '';
-        Object.keys(BADGES).forEach(bId => {
-            const b = BADGES[bId];
-            const hasBadge = student.badges && student.badges.includes(bId);
-            const checkboxId = `badge-chk-${bId}`;
-            badgesContainer.innerHTML += `
-                <label class="flex items-center gap-3 p-2 bg-surface-container/30 border border-outline-variant/10 rounded-lg cursor-pointer hover:bg-surface-container/50 transition-all">
-                    <input type="checkbox" id="${escapeHTML(checkboxId)}" ${hasBadge ? 'checked' : ''}
-                        onchange="window.toggleBadge(this, '${escapeJSAttr(studentId)}', '${escapeJSAttr(bId)}')"
-                        class="accent-primary w-4 h-4 cursor-pointer" />
-                    <div class="flex items-center gap-1.5 min-w-0">
-                        <span class="material-symbols-outlined text-sm text-primary">${escapeHTML(b.icon)}</span>
-                        <span class="text-xs text-on-surface truncate font-semibold">${escapeHTML(b.name)}</span>
-                    </div>
-                </label>
-            `;
-        });
-    }
-
-    // Populate coaching notes textarea
-    const notesTextarea = document.getElementById('teacher-manage-coaching-notes');
-    if (notesTextarea) notesTextarea.value = student.coachingNotes || '';
-
-    // Populate homework puzzle dropdown (show all PUZZLES from chess-engine)
-    const hwSelect = document.getElementById('teacher-manage-hw-select');
-    if (hwSelect && typeof PUZZLES !== 'undefined') {
-        hwSelect.innerHTML = '<option value="">-- Select a puzzle --</option>';
-        PUZZLES.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.id;
-            opt.textContent = `${p.id}: ${p.title}`;
-            hwSelect.appendChild(opt);
-        });
-    }
-
-    // Load and render homework assignments for the student
-    const hwContainer = document.getElementById('teacher-manage-hw-list');
-    if (hwContainer) {
-        hwContainer.innerHTML = '<span class="text-xs text-on-surface-variant">Loading...</span>';
-        const homeworkList = await API.getHomework(studentId);
-        window._currentStudentHomework = homeworkList || [];
-        renderHomeworkList(hwContainer, homeworkList || [], studentId);
-    }
-
-    // Load and render attendance chips
-    const attendanceContainer = document.getElementById('teacher-manage-attendance-chips');
-    if (attendanceContainer) {
-        const attendanceDates = student.attendanceHistory || [];
-        renderAttendanceChips(attendanceContainer, attendanceDates, studentId);
-    }
-
-    // Show the modal
-    const modal = document.getElementById('teacher-manage-modal');
-    if (modal) modal.classList.remove('hidden');
-};
-
-window.closeTeacherManageModal = function () {
-    const modal = document.getElementById('teacher-manage-modal');
-    if (modal) {
-        modal.classList.add('hidden');
-    }
-    window.activeTeacherManageStudentId = null;
-};
-
-window.saveStudentPoints = async function () {
-    const studentId = window.activeTeacherManageStudentId;
-    if (!studentId) {
-        showNotification("No student profile is currently active to modify", "error");
-        return;
-    }
-
-    const pointsInput = document.getElementById('teacher-manage-points');
-    if (!pointsInput) return;
-
-    const pointsVal = parseInt(pointsInput.value, 10);
-    if (isNaN(pointsVal) || pointsVal < 0) {
-        showNotification("Please enter a valid non-negative ELO rating", "warning");
-        return;
-    }
-
-    showNotification("Updating student ELO rating...", "info");
-    try {
-        const updatedProfile = await API.teacherUpdatePoints(studentId, pointsVal);
-        if (updatedProfile) {
-            // Update local state cache
-            const students = getStudents();
-            const idx = students.findIndex(s => s.id === studentId);
-            if (idx !== -1) {
-                students[idx] = updatedProfile;
-                saveStudents(students);
-            }
-
-            showNotification("Student ELO updated successfully!", "success");
-
-            // Re-render student rows in teacher page
-            const searchInput = document.getElementById('teacher-student-search');
-            window.renderTeacherStudentTable(searchInput ? searchInput.value : '');
-
-            // Close the modal
-            window.closeTeacherManageModal();
-        } else {
-            showNotification("Failed to update student ELO rating on server.", "error");
-        }
-    } catch (err) {
-        console.error(err);
-        showNotification("An error occurred during updating ELO points.", "error");
-    }
-};
-
-window.toggleBadge = async function (checkbox, studentId, badgeId) {
-    checkbox.disabled = true;
-    try {
-        let updatedProfile = null;
-        if (checkbox.checked) {
-            showNotification(`Awarding badge: ${BADGES[badgeId].name}...`, "info");
-            updatedProfile = await API.teacherAddBadge(studentId, badgeId);
-        } else {
-            showNotification(`Revoking badge: ${BADGES[badgeId].name}...`, "info");
-            updatedProfile = await API.teacherRemoveBadge(studentId, badgeId);
-        }
-
-        if (updatedProfile) {
-            // Update local state cache
-            const students = getStudents();
-            const idx = students.findIndex(s => s.id === studentId);
-            if (idx !== -1) {
-                students[idx] = updatedProfile;
-                saveStudents(students);
-            }
-            showNotification("Badge configuration saved!", "success");
-
-            // Re-render student rows in teacher page
-            const searchInput = document.getElementById('teacher-student-search');
-            window.renderTeacherStudentTable(searchInput ? searchInput.value : '');
-        } else {
-            checkbox.checked = !checkbox.checked; // revert UI checkbox check state
-            showNotification("Failed to update badge state on server.", "error");
-        }
-    } catch (err) {
-        checkbox.checked = !checkbox.checked; // revert UI checkbox check state
-        console.error(err);
-        showNotification("An error occurred during badge toggle request.", "error");
-    } finally {
-        checkbox.disabled = false;
-    }
-};
-
-// ==============================================
-// TEACHER SUITE: NEW ACTION HANDLERS
-// ==============================================
-
-function renderHomeworkList(container, homeworkList, studentId) {
-    if (!homeworkList || homeworkList.length === 0) {
-        container.innerHTML = '<span class="text-xs text-on-surface-variant italic">No homework assigned yet.</span>';
-        return;
-    }
-    container.innerHTML = '';
-    homeworkList.forEach(hw => {
-        const puzzle = (typeof PUZZLES !== 'undefined') ? PUZZLES.find(p => p.id === hw.puzzle_id) : null;
-        const puzzleTitle = puzzle ? puzzle.title : hw.puzzle_id;
-        const statusClass = hw.completed ? 'hw-chip hw-chip-done' : 'hw-chip hw-chip-pending';
-        const statusLabel = hw.completed ? '✓ Done' : 'Pending';
-        const chip = document.createElement('div');
-        chip.className = statusClass;
-        chip.innerHTML = `<span class="hw-chip-title">${escapeHTML(hw.puzzle_id)}: ${escapeHTML(puzzleTitle)}</span><span class="hw-chip-status">${statusLabel}</span>`;
-        container.appendChild(chip);
-    });
-}
-
-function renderAttendanceChips(container, dates, studentId) {
-    if (!dates || dates.length === 0) {
-        container.innerHTML = '<span class="text-xs text-on-surface-variant italic">No attendance records.</span>';
-        return;
-    }
-    container.innerHTML = '';
-    const sorted = [...dates].sort((a, b) => b.localeCompare(a));
-    sorted.forEach(date => {
-        const chip = document.createElement('span');
-        chip.className = 'attendance-chip';
-        chip.innerHTML = `${escapeHTML(date)} <button onclick="window.removeAttendanceDate('${escapeHTML(studentId)}', '${escapeHTML(date)}')" class="attendance-chip-del" title="Remove date">×</button>`;
-        container.appendChild(chip);
-    });
-}
-
-window.saveCoachingNotes = async function () {
-    const studentId = window.activeTeacherManageStudentId;
-    if (!studentId) return;
-    const textarea = document.getElementById('teacher-manage-coaching-notes');
-    if (!textarea) return;
-    const notes = textarea.value.trim();
-    showNotification('Saving coaching notes...', 'info');
-    const result = await API.updateCoachingNotes(studentId, notes);
-    if (result) {
-        const students = getStudents();
-        const idx = students.findIndex(s => s.id === studentId);
-        if (idx !== -1) { students[idx] = result; saveStudents(students); }
-        showNotification('Coaching notes saved!', 'success');
-    } else {
-        showNotification('Failed to save coaching notes.', 'error');
-    }
-};
-
-window.assignHomeworkToStudent = async function () {
-    const studentId = window.activeTeacherManageStudentId;
-    if (!studentId) return;
-    const hwSelect = document.getElementById('teacher-manage-hw-select');
-    if (!hwSelect || !hwSelect.value) {
-        showNotification('Please select a puzzle to assign.', 'warning');
-        return;
-    }
-    const puzzleId = hwSelect.value;
-    showNotification('Assigning homework...', 'info');
-    const result = await API.assignHomework(studentId, puzzleId);
-    if (result) {
-        showNotification('Homework assigned!', 'success');
-        const hwContainer = document.getElementById('teacher-manage-hw-list');
-        window._currentStudentHomework = result.homework || [];
-        if (hwContainer) renderHomeworkList(hwContainer, result.homework || [], studentId);
-        hwSelect.value = '';
-    } else {
-        showNotification('Failed to assign homework.', 'error');
-    }
-};
-
-window.broadcastHomeworkToAll = async function () {
-    const select = document.getElementById('broadcast-hw-select');
-    if (!select || !select.value) {
-        showNotification('Please select a puzzle to broadcast.', 'warning');
-        return;
-    }
-    const puzzleId = select.value;
-    const puzzle = (typeof PUZZLES !== 'undefined') ? PUZZLES.find(p => p.id === puzzleId) : null;
-    const puzzleTitle = puzzle ? puzzle.title : puzzleId;
-
-    // Disable the button to prevent double-click
-    const btn = document.getElementById('broadcast-hw-btn');
-    if (btn) { btn.disabled = true; btn.innerText = 'Assigning...'; }
-
-    showNotification(`Broadcasting "${puzzleTitle}" to all students...`, 'info');
-    const result = await API.assignHomeworkToAll(puzzleId);
-
-    if (btn) { btn.disabled = false; btn.innerText = 'Assign to All'; }
-
-    if (result && result.success) {
-        showNotification(
-            `✓ Homework assigned to ${result.assignedCount} student${result.assignedCount !== 1 ? 's' : ''}!`,
-            'success'
-        );
-        select.value = '';
-        // Refresh analytics so Active Homework counter updates
-        if (typeof window.loadTeacherAnalytics === 'function') window.loadTeacherAnalytics();
-    } else {
-        showNotification('Failed to broadcast homework to all students.', 'error');
-    }
-};
-
-// Populate the broadcast dropdown when teacher page opens
-window.initBroadcastDropdown = function () {
-    const select = document.getElementById('broadcast-hw-select');
-    if (!select || select.options.length > 1) return; // already populated
-    if (typeof PUZZLES === 'undefined') return;
-    PUZZLES.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p.id;
-        opt.textContent = `${p.id}: ${p.title}`;
-        select.appendChild(opt);
-    });
-};
+    }, { passive: true });
+})();
 
 
 
-window.removeAttendanceDate = async function (studentId, date) {
-    showNotification('Removing attendance record...', 'info');
-    const result = await API.removeManualAttendance(studentId, date);
-    if (result) {
-        const students = getStudents();
-        const idx = students.findIndex(s => s.id === studentId);
-        if (idx !== -1) { students[idx] = result; saveStudents(students); }
-        showNotification('Attendance record removed.', 'success');
-        const container = document.getElementById('teacher-manage-attendance-chips');
-        if (container) renderAttendanceChips(container, result.attendanceHistory || [], studentId);
-    } else {
-        showNotification('Failed to remove attendance record.', 'error');
-    }
-};
-
-window.addManualAttendance = async function () {
-    const studentId = window.activeTeacherManageStudentId;
-    if (!studentId) return;
-    const dateInput = document.getElementById('teacher-manage-attendance-date');
-    if (!dateInput || !dateInput.value) {
-        showNotification('Please select a date to log.', 'warning');
-        return;
-    }
-    const date = dateInput.value;
-    showNotification('Logging attendance...', 'info');
-    const result = await API.logManualAttendance(studentId, date);
-    if (result) {
-        const students = getStudents();
-        const idx = students.findIndex(s => s.id === studentId);
-        if (idx !== -1) { students[idx] = result; saveStudents(students); }
-        showNotification('Attendance logged!', 'success');
-        const container = document.getElementById('teacher-manage-attendance-chips');
-        if (container) renderAttendanceChips(container, result.attendanceHistory || [], studentId);
-        dateInput.value = '';
-    } else {
-        showNotification('Failed to log attendance.', 'error');
-    }
-};
-
-// Load and render teacher analytics summary grid
-window.loadTeacherAnalytics = async function () {
-    const data = await API.getTeacherAnalytics();
-    if (!data) return;
-    const el = (id) => document.getElementById(id);
-    if (el('analytics-total-students')) el('analytics-total-students').innerText = data.totalStudents;
-    if (el('analytics-avg-rating')) el('analytics-avg-rating').innerText = data.averageRating;
-    if (el('analytics-active-hw')) el('analytics-active-hw').innerText = data.activeHomeworkCount;
-    if (el('analytics-puzzles-solved')) el('analytics-puzzles-solved').innerText = data.totalPuzzlesSolved;
-};
 
 // Load homework widget and coaching notes for student dashboard
 window.loadStudentDashboardExtras = async function (userId) {
@@ -3591,7 +2798,7 @@ window.loadStudentDashboardExtras = async function (userId) {
                     <span class="text-xs font-semibold text-on-surface block truncate">${escapeHTML(puzzleTitle)}</span>
                     <span class="text-[10px] text-on-surface-variant">${escapeHTML(hw.puzzle_id)} · Assigned by coach</span>
                 </div>
-                <button onclick="window.startHomeworkPuzzle('${escapeHTML(hw.id)}', '${escapeHTML(hw.puzzle_id)}', '${escapeHTML(userId)}')" class="homework-item-btn">
+                <button data-action="startHomeworkPuzzle" data-hw-id="${escapeHTML(hw.id)}" data-puzzle-id="${escapeHTML(hw.puzzle_id)}" data-user-id="${escapeHTML(userId)}" class="homework-item-btn">
                     Solve
                 </button>
             `;
@@ -3611,3 +2818,1421 @@ window.startHomeworkPuzzle = function (assignmentId, puzzleId, studentId) {
     navigateTo('puzzles');
     showNotification(`Now solving: ${puzzleId}. Complete it to mark homework done!`, 'info');
 };
+
+// =======================================================
+// ADVANCED STATISTICS & HEATMAP/RADAR GRAPH RENDERING
+// =======================================================
+
+window.showGlobalTooltip = function (event, text) {
+    let tooltip = document.getElementById('app-global-tooltip');
+    if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'app-global-tooltip';
+        tooltip.className = 'absolute hidden bg-surface-container-highest border border-outline-variant text-[10px] text-on-surface font-semibold px-2 py-1 rounded-md shadow-md pointer-events-none z-[200] transition-opacity duration-150';
+        document.body.appendChild(tooltip);
+    }
+    tooltip.innerText = text;
+    tooltip.classList.remove('hidden');
+    
+    const rect = event.currentTarget.getBoundingClientRect();
+    tooltip.style.left = `${window.scrollX + rect.left + (rect.width / 2) - (tooltip.offsetWidth / 2)}px`;
+    tooltip.style.top = `${window.scrollY + rect.top - tooltip.offsetHeight - 6}px`;
+    tooltip.style.opacity = 1;
+};
+
+window.hideGlobalTooltip = function () {
+    const tooltip = document.getElementById('app-global-tooltip');
+    if (tooltip) {
+        tooltip.classList.add('hidden');
+        tooltip.style.opacity = 0;
+    }
+};
+
+// Tooltip helpers for Heatmap cells (handles mouse events)
+window.showHeatmapTooltip = function (event) {
+    const text = event.currentTarget.getAttribute('data-tooltip');
+    window.showGlobalTooltip(event, text);
+};
+window.hideHeatmapTooltip = function () {
+    window.hideGlobalTooltip();
+};
+
+function getPuzzleMotif(title) {
+    const t = title.toLowerCase();
+    if (t.includes('fork') || t.includes('double attack')) return 'Fork';
+    if (t.includes('mate') || t.includes('net') || t.includes('weakness')) return 'Checkmate';
+    if (t.includes('discovered') || t.includes('check')) return 'Discovered Attack';
+    if (t.includes('pin') || t.includes('diagonal')) return 'Pin';
+    if (t.includes('sacrifice') || t.includes('deflection') || t.includes('decoy')) return 'Sacrifice';
+    return 'Checkmate'; // default fallback
+}
+
+function renderTacticsHeatmap(user) {
+    const solvedCounts = {};
+    const detailed = user.solvedPuzzlesDetailed || [];
+    detailed.forEach(p => {
+        if (p.date) {
+            solvedCounts[p.date] = (solvedCounts[p.date] || 0) + 1;
+        }
+    });
+
+    // Calculate streak
+    let streak = 0;
+    let checkDate = new Date();
+    const todayStr = checkDate.toISOString().split('T')[0];
+    let hasToday = (solvedCounts[todayStr] || 0) > 0;
+    
+    let tempDate = new Date();
+    if (!hasToday) {
+        // If they didn't solve today, check if they solved yesterday to continue streak
+        tempDate.setDate(tempDate.getDate() - 1);
+    }
+    
+    while (true) {
+        const dStr = tempDate.toISOString().split('T')[0];
+        if (solvedCounts[dStr] > 0) {
+            streak++;
+            tempDate.setDate(tempDate.getDate() - 1);
+        } else {
+            break;
+        }
+    }
+
+    const streakTxt = document.getElementById('heatmap-streak-txt');
+    if (streakTxt) {
+        streakTxt.innerText = `${streak} day solved streak ${streak > 0 ? '🔥' : '❄️'}`;
+    }
+
+    const svg = document.getElementById('tactics-heatmap-svg');
+    if (!svg) return;
+    svg.innerHTML = '';
+
+    // Create 53 weeks (columns)
+    const cells = [];
+    const dateCursor = new Date();
+    dateCursor.setDate(dateCursor.getDate() - 364);
+    
+    // Adjust starting cursor to a Sunday so grid align is clean
+    const startDay = dateCursor.getDay(); // 0 is Sunday
+    dateCursor.setDate(dateCursor.getDate() - startDay);
+
+    for (let col = 0; col < 53; col++) {
+        for (let row = 0; row < 7; row++) {
+            const dateStr = dateCursor.toISOString().split('T')[0];
+            const count = solvedCounts[dateStr] || 0;
+            
+            // color-grade based on count
+            let color = 'rgba(255, 255, 255, 0.05)'; // default dark grey / surface
+            if (count === 1) color = 'rgba(16, 185, 129, 0.35)'; // light emerald
+            else if (count === 2) color = 'rgba(16, 185, 129, 0.6)'; // medium
+            else if (count >= 3) color = 'rgba(16, 185, 129, 1.0)'; // solid
+            
+            const x = col * 11.5;
+            const y = row * 11.5;
+
+            // Formatted date string for tooltip
+            const formattedDate = dateCursor.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+            const tooltipTxt = `${count} puzzle${count === 1 ? '' : 's'} solved on ${formattedDate}`;
+
+            cells.push(`
+                <rect x="${x}" y="${y}" width="9.5" height="9.5" rx="1.5"
+                    fill="${color}" 
+                    style="cursor: pointer;"
+                    class="transition-all hover:stroke-secondary hover:stroke-[1.5]"
+                    data-tooltip="${escapeHTML(tooltipTxt)}"
+                />
+            `);
+
+            dateCursor.setDate(dateCursor.getDate() + 1);
+        }
+    }
+
+    svg.innerHTML = cells.join('');
+}
+
+function renderTacticsRadarChart(user) {
+    const categories = ['Fork', 'Checkmate', 'Discovered Attack', 'Pin', 'Sacrifice'];
+    
+    // Count user solved puzzles per motif
+    const solvedCounts = { 'Fork': 0, 'Checkmate': 0, 'Discovered Attack': 0, 'Pin': 0, 'Sacrifice': 0 };
+    const totalPuzzles = { 'Fork': 0, 'Checkmate': 0, 'Discovered Attack': 0, 'Pin': 0, 'Sacrifice': 0 };
+    
+    // Populate total counts from PUZZLES list
+    if (typeof PUZZLES !== 'undefined') {
+        PUZZLES.forEach(p => {
+            const motif = getPuzzleMotif(p.title);
+            totalPuzzles[motif] = (totalPuzzles[motif] || 0) + 1;
+        });
+    }
+
+    const solvedList = user.solvedPuzzles || [];
+    solvedList.forEach(pId => {
+        const p = (typeof PUZZLES !== 'undefined') ? PUZZLES.find(item => item.id === pId) : null;
+        if (p) {
+            const motif = getPuzzleMotif(p.title);
+            solvedCounts[motif]++;
+        }
+    });
+
+    const svg = document.getElementById('tactics-radar-chart');
+    const listContainer = document.getElementById('tactics-motif-list');
+    if (!svg || !listContainer) return;
+    
+    svg.innerHTML = '';
+    listContainer.innerHTML = '';
+
+    // Render list/accuracy items
+    categories.forEach(cat => {
+        const solved = solvedCounts[cat];
+        const total = totalPuzzles[cat] || 1;
+        const pct = Math.round((solved / total) * 100);
+        
+        listContainer.innerHTML += `
+            <div class="flex flex-col gap-1">
+                <div class="flex justify-between items-center text-[10px]">
+                    <span class="text-on-surface font-semibold">${cat}</span>
+                    <span class="text-secondary font-bold">${solved}/${total} (${pct}%)</span>
+                </div>
+                <div class="w-full h-1 bg-surface-container rounded-full overflow-hidden">
+                    <div class="h-full bg-secondary rounded-full" style="width: ${pct}%"></div>
+                </div>
+            </div>
+        `;
+    });
+
+    // Draw background concentric pentagons (grids)
+    const gridScales = [0.2, 0.4, 0.6, 0.8, 1.0];
+    const R = 80;
+
+    gridScales.forEach(scale => {
+        const points = [];
+        for (let i = 0; i < 5; i++) {
+            const angle = (i * 2 * Math.PI / 5) - Math.PI / 2;
+            const x = R * scale * Math.cos(angle);
+            const y = R * scale * Math.sin(angle);
+            points.push(`${x},${y}`);
+        }
+        svg.innerHTML += `
+            <polygon points="${points.join(' ')}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+        `;
+    });
+
+    // Draw axes lines and text labels
+    for (let i = 0; i < 5; i++) {
+        const angle = (i * 2 * Math.PI / 5) - Math.PI / 2;
+        const x = R * Math.cos(angle);
+        const y = R * Math.sin(angle);
+        
+        // Draw axis line
+        svg.innerHTML += `
+            <line x1="0" y1="0" x2="${x}" y2="${y}" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+        `;
+
+        // Text label positioning
+        const labelX = (R + 18) * Math.cos(angle);
+        const labelY = (R + 10) * Math.sin(angle);
+        let textAnchor = 'middle';
+        if (Math.cos(angle) > 0.1) textAnchor = 'start';
+        else if (Math.cos(angle) < -0.1) textAnchor = 'end';
+
+        svg.innerHTML += `
+            <text x="${labelX}" y="${labelY + 3}" fill="var(--color-on-surface-variant)" font-size="8" font-weight="bold" text-anchor="${textAnchor}">${categories[i]}</text>
+        `;
+    }
+
+    // Reference benchmark average shape
+    const refPoints = [];
+    for (let i = 0; i < 5; i++) {
+        const angle = (i * 2 * Math.PI / 5) - Math.PI / 2;
+        const refVal = 0.5; 
+        const x = R * refVal * Math.cos(angle);
+        const y = R * refVal * Math.sin(angle);
+        refPoints.push(`${x},${y}`);
+    }
+    svg.innerHTML += `
+        <polygon points="${refPoints.join(' ')}" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.15)" stroke-width="1" stroke-dasharray="2,2"/>
+    `;
+
+    // Student actual performance shape
+    const studentPoints = [];
+    for (let i = 0; i < 5; i++) {
+        const cat = categories[i];
+        const solved = solvedCounts[cat];
+        const total = totalPuzzles[cat] || 1;
+        
+        const pct = Math.max(0.12, solved / total);
+        const angle = (i * 2 * Math.PI / 5) - Math.PI / 2;
+        const x = R * pct * Math.cos(angle);
+        const y = R * pct * Math.sin(angle);
+        studentPoints.push(`${x},${y}`);
+    }
+    
+    svg.innerHTML += `
+        <polygon points="${studentPoints.join(' ')}" fill="rgba(222, 184, 135, 0.2)" stroke="var(--color-secondary)" stroke-width="2"/>
+    `;
+
+    // Draw coordinate dots
+    for (let i = 0; i < 5; i++) {
+        const cat = categories[i];
+        const solved = solvedCounts[cat];
+        const total = totalPuzzles[cat] || 1;
+        const pct = Math.max(0.12, solved / total);
+        
+        const angle = (i * 2 * Math.PI / 5) - Math.PI / 2;
+        const x = R * pct * Math.cos(angle);
+        const y = R * pct * Math.sin(angle);
+        
+        svg.innerHTML += `
+            <circle cx="${x}" cy="${y}" r="3.5" fill="var(--color-secondary)" stroke="var(--color-surface-container-highest)" stroke-width="1"
+                style="cursor: pointer;"
+                data-tooltip="${cat}: ${solved} solved / ${total} total"
+            />
+        `;
+    }
+}
+
+// ================================================================
+// TEACHER ROLE CHECK
+// ================================================================
+let currentUserRole = 'student';
+
+async function checkTeacherRole() {
+    try {
+        const res = await fetch('/api/me/role', { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        currentUserRole = data.role || 'student';
+
+        // Show/hide teacher controls
+        const addAnnouncementBtn = document.getElementById('add-announcement-btn');
+        const addTournamentBtn = document.getElementById('add-tournament-btn');
+        if (addAnnouncementBtn) {
+            addAnnouncementBtn.classList.toggle('hidden', currentUserRole !== 'teacher');
+        }
+        if (addTournamentBtn) {
+            addTournamentBtn.classList.toggle('hidden', currentUserRole !== 'teacher');
+        }
+    } catch (e) {}
+}
+
+// ================================================================
+// COACH ANNOUNCEMENTS BOARD
+// ================================================================
+async function loadAnnouncements() {
+    const list = document.getElementById('announcements-list');
+    if (!list) return;
+    list.innerHTML = `<span class="text-xs text-on-surface-variant italic animate-pulse">Loading announcements...</span>`;
+    try {
+        const res = await fetch('/api/announcements');
+        const data = await res.json();
+        if (!data.length) {
+            list.innerHTML = `<span class="text-xs text-on-surface-variant italic">No announcements yet. Check back soon!</span>`;
+            return;
+        }
+        list.innerHTML = data.map(a => `
+            <div class="relative p-3 rounded-xl bg-surface-container-high border ${a.pinned ? 'border-primary/40' : 'border-outline-variant/25'} flex flex-col gap-1">
+                ${a.pinned ? `<span class="text-[9px] text-primary font-bold uppercase tracking-wider mb-0.5 flex items-center gap-1"><span class="material-symbols-outlined text-[10px]">push_pin</span> Pinned</span>` : ''}
+                <div class="flex justify-between items-start">
+                    <span class="text-xs font-bold text-on-surface leading-tight">${escapeHTML(a.title)}</span>
+                    ${currentUserRole === 'teacher' ? `<button data-action="deleteAnnouncement" data-id="${a.id}" class="ml-1 text-on-surface-variant hover:text-red-400 transition-colors flex-shrink-0"><span class="material-symbols-outlined text-xs">delete</span></button>` : ''}
+                </div>
+                <p class="text-[11px] text-on-surface-variant leading-relaxed">${escapeHTML(a.body)}</p>
+                <span class="text-[10px] text-on-surface-variant/60 mt-1">${new Date(a.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} · ${escapeHTML(a.author_name)}</span>
+            </div>
+        `).join('');
+    } catch (e) {
+        list.innerHTML = `<span class="text-xs text-red-400">Failed to load announcements.</span>`;
+    }
+}
+
+function openAnnouncementModal() {
+    const m = document.getElementById('announcement-modal');
+    if (m) m.classList.remove('hidden');
+}
+function closeAnnouncementModal() {
+    const m = document.getElementById('announcement-modal');
+    if (m) m.classList.add('hidden');
+}
+
+async function submitAnnouncement() {
+    const title = document.getElementById('announcement-title-input')?.value.trim();
+    const body = document.getElementById('announcement-body-input')?.value.trim();
+    const pinned = document.getElementById('announcement-pinned-input')?.checked;
+    if (!title || !body) return showNotification('Title and body are required.', 'error');
+    try {
+        const res = await fetch('/api/announcements', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ title, body, pinned })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        closeAnnouncementModal();
+        document.getElementById('announcement-title-input').value = '';
+        document.getElementById('announcement-body-input').value = '';
+        document.getElementById('announcement-pinned-input').checked = false;
+        showNotification('Announcement posted!', 'success');
+        loadAnnouncements();
+    } catch (e) {
+        showNotification('Failed to post announcement.', 'error');
+    }
+}
+
+async function deleteAnnouncement(id) {
+    try {
+        await fetch(`/api/announcements/${id}`, { method: 'DELETE', credentials: 'include' });
+        showNotification('Announcement deleted.', 'success');
+        loadAnnouncements();
+    } catch (e) {
+        showNotification('Failed to delete.', 'error');
+    }
+}
+
+// ================================================================
+// DAILY PUZZLE CARD
+// ================================================================
+function loadDailyPuzzle() {
+    const titleEl = document.getElementById('daily-puzzle-title');
+    const descEl = document.getElementById('daily-puzzle-desc');
+    if (!titleEl || !descEl) return;
+
+    // Pick a deterministic puzzle of the day based on date seed
+    const today = new Date();
+    const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+
+    if (typeof PUZZLES === 'undefined' || PUZZLES.length === 0) {
+        titleEl.innerText = 'Puzzles loading...';
+        return;
+    }
+    const idx = seed % PUZZLES.length;
+    const puzzle = PUZZLES[idx];
+    titleEl.innerText = puzzle.title;
+    descEl.innerText = puzzle.description;
+
+    // Check if already solved today
+    const user = getCurrentUser();
+    const todayStr = today.toISOString().split('T')[0];
+    const alreadySolved = user && user.solvedPuzzles && user.solvedPuzzles.includes(puzzle.id);
+    const btn = document.getElementById('daily-puzzle-btn');
+    if (btn) {
+        if (alreadySolved) {
+            btn.innerHTML = `<span class="material-symbols-outlined text-sm">check_circle</span> Solved Today! ✅`;
+            btn.classList.add('opacity-70', 'cursor-default');
+            btn.onclick = null;
+        } else {
+            btn.innerHTML = `<span class="material-symbols-outlined text-sm">play_circle</span> Solve Now`;
+            btn.classList.remove('opacity-70', 'cursor-default');
+            btn.onclick = () => startDailyPuzzle();
+        }
+    }
+
+    window._dailyPuzzleId = puzzle.id;
+}
+
+function startDailyPuzzle() {
+    navigateTo('puzzles');
+    setTimeout(() => {
+        if (window._dailyPuzzleId && typeof loadPuzzle === 'function') {
+            loadPuzzle(window._dailyPuzzleId);
+        }
+    }, 400);
+}
+
+// ================================================================
+// ACADEMY TOURNAMENTS
+// ================================================================
+async function loadAcademyTournaments() {
+    const container = document.getElementById('academy-tournaments-list');
+    if (!container) return;
+    container.innerHTML = `<div class="col-span-full text-center py-8 text-on-surface-variant text-sm animate-pulse">Loading tournaments...</div>`;
+    try {
+        await checkTeacherRole();
+        const res = await fetch('/api/tournaments/academy');
+        const tournaments = await res.json();
+
+        if (!tournaments.length) {
+            container.innerHTML = `
+                <div class="col-span-full text-center py-12">
+                    <span class="material-symbols-outlined text-5xl text-on-surface-variant/40 mb-3">emoji_events</span>
+                    <p class="text-sm text-on-surface-variant">No tournaments yet. Stay tuned!</p>
+                </div>`;
+            return;
+        }
+
+        container.innerHTML = tournaments.map(t => {
+            const statusColor = t.status === 'ongoing' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                t.status === 'completed' ? 'bg-slate-500/20 text-slate-400 border-slate-500/30' :
+                'bg-amber-500/20 text-amber-400 border-amber-500/30';
+            const statusLabel = t.status === 'ongoing' ? '🔴 Ongoing' : t.status === 'completed' ? '✅ Completed' : '⏳ Upcoming';
+            return `
+                <div class="glass-card rounded-2xl p-6 border border-outline-variant/30 flex flex-col gap-3 hover:border-secondary/40 transition-all">
+                    <div class="flex items-start justify-between gap-2">
+                        <h4 class="font-bold text-on-surface text-base leading-tight">${escapeHTML(t.title)}</h4>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusColor} flex-shrink-0">${statusLabel}</span>
+                    </div>
+                    ${t.description ? `<p class="text-xs text-on-surface-variant leading-relaxed">${escapeHTML(t.description)}</p>` : ''}
+                    <div class="flex items-center gap-3 text-[11px] text-on-surface-variant">
+                        ${t.start_date ? `<span class="flex items-center gap-1"><span class="material-symbols-outlined text-xs">calendar_today</span>${escapeHTML(t.start_date)}</span>` : ''}
+                        <span class="flex items-center gap-1"><span class="material-symbols-outlined text-xs">group</span>${t.registrations} registered</span>
+                        <span class="flex items-center gap-1"><span class="material-symbols-outlined text-xs">person</span>${escapeHTML(t.creator_name)}</span>
+                    </div>
+                    <div class="flex flex-col gap-2 mt-2">
+                        <div class="flex gap-2">
+                            ${t.isRegistered ? `
+                                <div class="flex-1 py-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-bold flex items-center justify-center gap-1">
+                                    <span class="material-symbols-outlined text-sm">check_circle</span> You have registered
+                                </div>
+                            ` : (t.status !== 'completed' ? `
+                                <button data-action="registerTournament" data-id="${t.id}" class="flex-1 py-2 bg-secondary text-on-secondary rounded-xl text-xs font-bold transition-all shadow hover:bg-secondary/90 flex items-center justify-center gap-1 cursor-pointer">
+                                    <span class="material-symbols-outlined text-sm">how_to_reg</span> Register
+                                </button>
+                            ` : '')}
+                            ${currentUserRole === 'teacher' ? `
+                                <button data-action="updateTournamentStatus" data-id="${t.id}" data-status="${t.status === 'upcoming' ? 'ongoing' : 'completed'}" title="Change Status" class="py-2 px-3 bg-surface-container-high text-on-surface border border-outline-variant rounded-xl text-xs font-bold transition-all hover:bg-surface-variant/30 flex items-center gap-1">
+                                    <span class="material-symbols-outlined text-sm">${t.status === 'upcoming' ? 'play_circle' : 'check_circle'}</span>
+                                </button>
+                                <button data-action="deleteTournament" data-id="${t.id}" class="py-2 px-3 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl text-xs font-bold hover:bg-red-500/20 transition-all flex items-center">
+                                    <span class="material-symbols-outlined text-sm">delete</span>
+                                </button>
+                            ` : ''}
+                        </div>
+                        <button data-action="toggleTournamentDetails" data-id="${t.id}" class="py-1.5 px-3 bg-surface-container-high text-on-surface border border-outline-variant/35 rounded-xl text-[11px] font-bold transition-all hover:bg-surface-variant/30 flex items-center justify-center gap-1.5 w-full">
+                            <span class="material-symbols-outlined text-sm">visibility</span> View Bracket & Standings
+                        </button>
+                        <div id="tournament-details-${t.id}" class="hidden mt-2 p-3 rounded-xl bg-surface-container-low border border-outline-variant/20 space-y-3">
+                            <div id="tournament-players-${t.id}">
+                                <span class="text-[9px] font-bold text-secondary uppercase tracking-wider block mb-1">Players</span>
+                                <div id="players-list-${t.id}" class="flex flex-wrap gap-1">
+                                    <span class="text-[10px] text-on-surface-variant italic">No players registered yet.</span>
+                                </div>
+                            </div>
+                            <div id="tournament-pairings-${t.id}">
+                                <span class="text-[9px] font-bold text-primary uppercase tracking-wider block mb-1">Bracket Pairings</span>
+                                <div id="pairings-list-${t.id}" class="space-y-1.5">
+                                    <span class="text-[10px] text-on-surface-variant italic">Pairings will appear when ongoing.</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        container.innerHTML = `<div class="col-span-full text-center py-8 text-red-400 text-sm">Failed to load tournaments.</div>`;
+    }
+}
+
+function openTournamentModal() {
+    const m = document.getElementById('tournament-modal');
+    if (m) m.classList.remove('hidden');
+}
+function closeTournamentModal() {
+    const m = document.getElementById('tournament-modal');
+    if (m) m.classList.add('hidden');
+}
+
+async function submitTournament() {
+    const title = document.getElementById('tournament-title-input')?.value.trim();
+    const description = document.getElementById('tournament-desc-input')?.value.trim();
+    const start_date = document.getElementById('tournament-date-input')?.value.trim();
+    if (!title) return showNotification('Tournament name is required.', 'error');
+    try {
+        const res = await fetch('/api/tournaments/academy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ title, description, start_date })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        closeTournamentModal();
+        document.getElementById('tournament-title-input').value = '';
+        document.getElementById('tournament-desc-input').value = '';
+        document.getElementById('tournament-date-input').value = '';
+        showNotification('Tournament created!', 'success');
+        loadAcademyTournaments();
+    } catch (e) {
+        showNotification('Failed to create tournament.', 'error');
+    }
+}
+
+async function registerTournament(id) {
+    try {
+        const res = await fetch(`/api/tournaments/academy/${id}/register`, { method: 'POST', credentials: 'include' });
+        if (!res.ok) throw new Error(await res.text());
+        showNotification('Registered for tournament!', 'success');
+        loadAcademyTournaments();
+    } catch (e) {
+        showNotification('Registration failed.', 'error');
+    }
+}
+
+async function deleteTournament(id) {
+    try {
+        await fetch(`/api/tournaments/academy/${id}`, { method: 'DELETE', credentials: 'include' });
+        showNotification('Tournament deleted.', 'success');
+        loadAcademyTournaments();
+    } catch (e) {
+        showNotification('Failed to delete.', 'error');
+    }
+}
+
+async function updateTournamentStatus(id, status) {
+    try {
+        await fetch(`/api/tournaments/academy/${id}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ status })
+        });
+        showNotification(`Tournament marked ${status}!`, 'success');
+        loadAcademyTournaments();
+    } catch (e) {
+        showNotification('Failed to update.', 'error');
+    }
+}
+
+// ================================================================
+// PDF PROGRESS REPORT CARD
+// ================================================================
+function downloadProgressReport() {
+    const user = getCurrentUser();
+    if (!user) return showNotification('Please sign in to download your report.', 'error');
+
+    const { jsPDF } = window.jspdf || {};
+    if (!jsPDF) return showNotification('PDF library not loaded. Try refreshing.', 'error');
+
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+    // Helper: Draw footer at bottom of a page
+    function drawFooter(pdfDoc) {
+        pdfDoc.setFillColor(30, 27, 75);
+        pdfDoc.rect(0, 280, 210, 17, 'F');
+        pdfDoc.setTextColor(200, 190, 240);
+        pdfDoc.setFontSize(8);
+        pdfDoc.setFont('helvetica', 'normal');
+        pdfDoc.text('Mind Square Chess Academy · This report was generated automatically and is for internal use only.', 15, 290);
+    }
+
+    // Helper: Turn the website logo white for dark header contrast
+    function getWhiteLogo() {
+        const logoImg = document.getElementById('header-logo-img');
+        if (!logoImg) return null;
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = logoImg.naturalWidth || logoImg.width || 128;
+            canvas.height = logoImg.naturalHeight || logoImg.height || 128;
+            const ctx = canvas.getContext('2d');
+            
+            // Draw original logo
+            ctx.drawImage(logoImg, 0, 0);
+            
+            // Tint to solid white
+            ctx.globalCompositeOperation = 'source-in';
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            return canvas.toDataURL('image/png');
+        } catch (e) {
+            console.warn("Failed to generate white logo canvas:", e);
+            return null;
+        }
+    }
+
+    // Header Gradient background
+    doc.setFillColor(30, 27, 75);
+    doc.rect(0, 0, 210, 55, 'F');
+    doc.setFillColor(88, 28, 135);
+    doc.rect(0, 35, 210, 20, 'F');
+
+    // Add Academy Logo (White, larger)
+    try {
+        const whiteLogo = getWhiteLogo();
+        if (whiteLogo) {
+            doc.addImage(whiteLogo, 'PNG', 15, 7, 20, 20);
+        } else {
+            // Fallback to original logo if canvas fails
+            const logoImg = document.getElementById('header-logo-img');
+            if (logoImg) doc.addImage(logoImg, 'PNG', 15, 7, 20, 20);
+        }
+    } catch (e) {
+        console.warn("Could not add logo to PDF:", e);
+    }
+
+    // Academy name & metadata (shifted x-coord to 40 to make space for the larger logo)
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Mind Square Chess Academy', 40, 19);
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Progress Report Card', 40, 27);
+
+    doc.setFontSize(9);
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`, 15, 45);
+    doc.text(`Student ID: ${user.id}`, 130, 45);
+
+    // Student name section
+    doc.setFillColor(245, 243, 255);
+    doc.rect(0, 55, 210, 30, 'F');
+    doc.setTextColor(30, 27, 75);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text(user.name || 'Student', 15, 72);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 90, 140);
+    doc.text(user.email || '', 15, 80);
+    doc.text(`Category: ${user.category || 'Beginner'}`, 140, 72);
+
+    // Divider
+    doc.setDrawColor(180, 160, 220);
+    doc.setLineWidth(0.4);
+    doc.line(15, 88, 195, 88);
+
+    // Stats section
+    doc.setTextColor(30, 27, 75);
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Performance Statistics', 15, 97);
+
+    const stats = [
+        ['Total Points (ELO)', `${user.points || 0} pts`],
+        ['Games Played', `${user.gamesPlayed || 0}`],
+        ['Wins', `${user.winCount || 0}`],
+        ['Win Rate', `${user.gamesPlayed > 0 ? Math.round((user.winCount / user.gamesPlayed) * 100) : 0}%`],
+        ['Puzzles Solved', `${(user.solvedPuzzles || []).length}`],
+        ['Academy Rank', `#${getUserRank(user.id)}`],
+    ];
+
+    let y = 106;
+    stats.forEach(([label, value], i) => {
+        const bg = i % 2 === 0 ? [250, 248, 255] : [240, 237, 252];
+        doc.setFillColor(...bg);
+        doc.rect(15, y - 5, 180, 9, 'F');
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(70, 60, 110);
+        doc.text(label, 18, y);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 27, 75);
+        doc.text(value, 155, y, { align: 'right' });
+        y += 10;
+    });
+
+    // Badges section
+    y += 5;
+    doc.setDrawColor(180, 160, 220);
+    doc.line(15, y, 195, y);
+    y += 8;
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 27, 75);
+    doc.text('Earned Badges & Achievements', 15, y);
+    y += 8;
+
+    const BADGE_DESIGNS = {
+        "Beginner": { emoji: "🛡️", gradStart: "#3b82f6", gradEnd: "#06b6d4" },
+        "Intermediate": { emoji: "🎖️", gradStart: "#a855f7", gradEnd: "#6366f1" },
+        "Super Intermediate": { emoji: "⭐", gradStart: "#ec4899", gradEnd: "#f43f5e" },
+        "Advanced": { emoji: "🏆", gradStart: "#f59e0b", gradEnd: "#f97316" },
+        "Super Advanced": { emoji: "✨", gradStart: "#f43f5e", gradEnd: "#dc2626" },
+        "Grandmaster": { emoji: "👑", gradStart: "#facc15", gradEnd: "#ea580c" },
+        "FirstBlood": { emoji: "⚔️", gradStart: "#f87171", gradEnd: "#f43f5e" },
+        "Unstoppable": { emoji: "🔥", gradStart: "#f97316", gradEnd: "#dc2626" },
+        "Invincible": { emoji: "🛡️", gradStart: "#9333ea", gradEnd: "#dc2626" },
+        "TacticWizard": { emoji: "🪄", gradStart: "#22d3ee", gradEnd: "#2563eb" },
+        "PuzzleMaster": { emoji: "🧠", gradStart: "#818cf8", gradEnd: "#8b5cf6" },
+        "DeepThinker": { emoji: "⏳", gradStart: "#2dd4bf", gradEnd: "#059669" },
+        "SpeedDemon": { emoji: "⚡", gradStart: "#fbbf24", gradEnd: "#eab308" },
+        "Blitzkrieg": { emoji: "⚡", gradStart: "#ef4444", gradEnd: "#f97316" },
+        "RapidMaster": { emoji: "⏰", gradStart: "#2563eb", gradEnd: "#4f46e5" },
+        "Scholar": { emoji: "📖", gradStart: "#60a5fa", gradEnd: "#2563eb" },
+        "Other": { emoji: "🎨", gradStart: "#10b981", gradEnd: "#0d9488" }
+    };
+
+    function generateBadgeImage(bId) {
+        const design = BADGE_DESIGNS[bId] || BADGE_DESIGNS["Beginner"];
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+
+        // Create gradient background
+        const grad = ctx.createLinearGradient(0, 0, 128, 128);
+        grad.addColorStop(0, design.gradStart);
+        grad.addColorStop(1, design.gradEnd);
+        ctx.fillStyle = grad;
+        
+        // Draw rounded rectangle
+        const radius = 28;
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(4, 4, 120, 120, radius);
+        } else {
+            ctx.rect(4, 4, 120, 120);
+        }
+        ctx.fill();
+
+        // Draw glass gloss overlay on top half
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(4, 4, 120, 60, [radius, radius, 0, 0]);
+        } else {
+            ctx.rect(4, 4, 120, 60);
+        }
+        ctx.fill();
+
+        // Draw emoji icon in center
+        ctx.font = '64px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(design.emoji, 64, 66);
+
+        return canvas.toDataURL('image/png');
+    }
+
+    const badges = user.badges || ['Beginner'];
+    badges.forEach((bId, i) => {
+        const b = BADGES[bId] || BADGES['Beginner'];
+        const col = i % 2 === 0 ? 15 : 110;
+        
+        // Push spacing for the next row
+        if (i % 2 === 0 && i > 0) {
+            y += 12;
+        }
+
+        // Automatic Page Break if badges exceed the page boundary (265mm)
+        if (y > 265) {
+            drawFooter(doc);
+            doc.addPage();
+            
+            // Draw page 2 header banner
+            doc.setFillColor(30, 27, 75);
+            doc.rect(0, 0, 210, 15, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Mind Square Chess Academy - Earned Badges (Cont.)', 15, 10);
+            
+            y = 25; // Reset content start y on new page
+        }
+
+        // Generate and add badge image graphic (clean 9x9mm size)
+        try {
+            const imgData = generateBadgeImage(bId);
+            doc.addImage(imgData, 'PNG', col, y - 4, 9, 9);
+        } catch (e) {
+            console.error("Failed to add badge image to PDF:", e);
+            doc.setFillColor(235, 230, 255);
+            doc.circle(col + 4.5, y + 0.5, 4.5, 'F');
+        }
+
+        // Draw badge name
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(30, 27, 75);
+        doc.text(b.name, col + 12, y - 1);
+        
+        // Draw badge description
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.setTextColor(100, 90, 140);
+        const splitDesc = doc.splitTextToSize(b.desc, 72);
+        doc.text(splitDesc, col + 12, y + 2.5);
+    });
+
+    if (badges.length > 0) {
+        y += 10;
+    }
+
+    // Coaching notes
+    if (user.coachingNotes) {
+        y += 8;
+        
+        // Automatic Page Break if coaching notes would overflow
+        if (y > 255) {
+            drawFooter(doc);
+            doc.addPage();
+            
+            // Draw page 2 header banner
+            doc.setFillColor(30, 27, 75);
+            doc.rect(0, 0, 210, 15, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.text("Mind Square Chess Academy - Coach's Notes (Cont.)", 15, 10);
+            
+            y = 25;
+        }
+
+        doc.setDrawColor(180, 160, 220);
+        doc.line(15, y, 195, y);
+        y += 8;
+        doc.setFontSize(13);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 27, 75);
+        doc.text("Coach's Notes", 15, y);
+        y += 7;
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(80, 70, 120);
+        const lines = doc.splitTextToSize(user.coachingNotes, 175);
+        doc.text(lines, 15, y);
+        y += lines.length * 5.5;
+    }
+
+    // Draw footer on final page
+    drawFooter(doc);
+
+    doc.save(`MindSquare_Report_${(user.name || 'student').replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
+    showNotification('Report card downloaded!', 'success');
+}
+
+// ================================================================
+// CONFETTI WIN CELEBRATION
+// ================================================================
+function launchConfetti() {
+    const canvas = document.createElement('canvas');
+    canvas.id = 'confetti-canvas';
+    canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;pointer-events:none;';
+    document.body.appendChild(canvas);
+
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const colors = ['#a855f7', '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#f97316'];
+    const particles = Array.from({ length: 160 }, () => ({
+        x: Math.random() * canvas.width,
+        y: -10,
+        r: Math.random() * 6 + 3,
+        d: Math.random() * 10 + 2,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        tilt: Math.floor(Math.random() * 10) - 10,
+        tiltAngle: 0,
+        tiltAngleIncrement: Math.random() * 0.07 + 0.05
+    }));
+
+    let angle = 0;
+    let frame;
+    let elapsed = 0;
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        angle += 0.01;
+        elapsed++;
+        particles.forEach(p => {
+            p.tiltAngle += p.tiltAngleIncrement;
+            p.y += (Math.cos(angle + p.d) + 2) * 1.8;
+            p.x += Math.sin(angle) * 1.2;
+            p.tilt = Math.sin(p.tiltAngle) * 12;
+            ctx.beginPath();
+            ctx.lineWidth = p.r;
+            ctx.strokeStyle = p.color;
+            ctx.moveTo(p.x + p.tilt + p.r / 4, p.y);
+            ctx.lineTo(p.x + p.tilt, p.y + p.tilt + p.r / 4);
+            ctx.stroke();
+        });
+        if (elapsed < 200) {
+            frame = requestAnimationFrame(draw);
+        } else {
+            canvas.remove();
+        }
+    }
+    draw();
+}
+
+// Hook confetti into recordGameResult wins
+const _origRecordGameResult = window.recordGameResult || recordGameResult;
+window.recordGameResultWithCelebration = function(result) {
+    if (result === 'win') {
+        launchConfetti();
+    }
+    if (typeof _origRecordGameResult === 'function') {
+        _origRecordGameResult(result);
+    }
+};
+
+// ================================================================
+// WEBSOCKET LIVE CHALLENGE
+// ================================================================
+let _liveWS = null;
+let _liveOpponentId = null;
+let _liveGameId = null;
+let _liveMyColor = null;
+let _liveClockLimit = 300;
+
+function initLiveChallenge() {
+    const user = getCurrentUser();
+    if (!user) return;
+    if (_liveWS && _liveWS.readyState === WebSocket.OPEN) return;
+
+    const wsUrl = `ws://${window.location.host}`;
+    _liveWS = new WebSocket(wsUrl);
+
+    _liveWS.onopen = () => {
+        _liveWS.send(JSON.stringify({ type: 'register', userId: user.id, userName: user.name }));
+    };
+
+    _liveWS.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        handleLiveWSMessage(msg);
+    };
+
+    _liveWS.onclose = () => {
+        _liveWS = null;
+    };
+}
+
+function handleLiveWSMessage(msg) {
+    switch (msg.type) {
+        case 'online_users':
+            renderOnlineUsers(msg.users);
+            break;
+        case 'challenge_invited':
+            showChallengeInvite(msg);
+            break;
+        case 'challenge_accepted':
+            startLiveGame(msg);
+            break;
+        case 'challenge_declined':
+            showNotification(`${msg.declinedByName} declined your challenge.`, 'error');
+            break;
+        case 'opponent_move':
+            applyOpponentMove(msg.move, msg.fen);
+            break;
+        case 'opponent_resigned':
+            showNotification('Opponent resigned! You win! 🎉', 'success');
+            launchConfetti();
+            break;
+        case 'opponent_draw_offered':
+            showDrawOffer();
+            break;
+        case 'opponent_draw_accepted':
+            showNotification("It's a draw! 🤝", 'info');
+            break;
+        case 'chat':
+            appendLiveChat(msg.senderName, msg.text);
+            break;
+        case 'spectator_move':
+            if (typeof window.handleSpectatorMove === 'function') {
+                window.handleSpectatorMove(msg.gameId, msg.move, msg.fen, msg.san);
+            }
+            break;
+        case 'spectator_game_over':
+            if (typeof window.handleSpectatorGameOver === 'function') {
+                window.handleSpectatorGameOver(msg.gameId, msg.result);
+            }
+            break;
+        case 'spectator_count':
+            if (typeof window.updateSpectatorCount === 'function') {
+                window.updateSpectatorCount(msg.gameId, msg.count);
+            }
+            break;
+    }
+}
+
+function renderOnlineUsers(users) {
+    const container = document.getElementById('live-challenge-users');
+    if (!container) return;
+    if (!users.length) {
+        container.innerHTML = `<span class="text-xs text-on-surface-variant italic">No other students online right now.</span>`;
+        return;
+    }
+    container.innerHTML = users.map(u => `
+        <div class="flex items-center justify-between p-2 rounded-xl bg-surface-container-high border border-outline-variant/25 gap-2">
+            <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span class="text-xs font-semibold text-on-surface">${escapeHTML(u.name)}</span>
+            </div>
+            <button data-action="sendChallengeInvite" data-target-user-id="${u.id}" data-target-user-name="${u.name.replace(/'/g, "\\'")}"
+                class="text-[10px] px-2 py-1 bg-secondary text-on-secondary rounded-lg font-bold hover:bg-secondary/90 transition-all">
+                ⚔️ Challenge
+            </button>
+        </div>
+    `).join('');
+}
+
+function sendChallengeInvite(targetUserId, targetUserName, clockLimit) {
+    if (!_liveWS) { showNotification('Not connected. Refresh the page.', 'error'); return; }
+    _liveWS.send(JSON.stringify({ type: 'challenge_invite', targetUserId, clockLimit: clockLimit || 300 }));
+    showNotification(`Challenge sent to ${targetUserName}!`, 'success');
+}
+
+function showChallengeInvite(msg) {
+    const user = getCurrentUser();
+    const banner = document.getElementById('live-challenge-invite-banner');
+    if (banner) {
+        banner.classList.remove('hidden');
+        banner.innerHTML = `
+            <div class="flex items-center gap-2 justify-between flex-wrap">
+                <span class="text-sm font-bold text-on-surface">⚔️ <strong>${escapeHTML(msg.senderName)}</strong> challenged you!</span>
+                <div class="flex gap-2">
+                    <button data-action="acceptChallenge" data-sender-id="${msg.senderId}" data-clock-limit="${msg.clockLimit}" class="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-bold hover:bg-emerald-600">Accept</button>
+                    <button data-action="declineChallenge" data-sender-id="${msg.senderId}" class="px-3 py-1.5 bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-xs font-bold hover:bg-red-500/30">Decline</button>
+                </div>
+            </div>
+        `;
+    }
+}
+
+function acceptChallenge(senderId, clockLimit) {
+    if (!_liveWS) return;
+    _liveWS.send(JSON.stringify({ type: 'challenge_accept', senderId, clockLimit }));
+    const banner = document.getElementById('live-challenge-invite-banner');
+    if (banner) banner.classList.add('hidden');
+}
+
+function declineChallenge(senderId) {
+    if (!_liveWS) return;
+    _liveWS.send(JSON.stringify({ type: 'challenge_decline', senderId }));
+    const banner = document.getElementById('live-challenge-invite-banner');
+    if (banner) banner.classList.add('hidden');
+}
+
+function startLiveGame(msg) {
+    const user = getCurrentUser();
+    _liveGameId = msg.gameId;
+    _liveMyColor = msg.whitePlayerId === user.id ? 'w' : 'b';
+    _liveOpponentId = _liveMyColor === 'w' ? msg.blackPlayerId : msg.whitePlayerId;
+    _liveClockLimit = msg.clockLimit || 300;
+
+    showNotification(`Live game started! You play as ${_liveMyColor === 'w' ? 'White' : 'Black'}. Good luck!`, 'success');
+    navigateTo('chess');
+
+    setTimeout(() => {
+        if (typeof initChessGame === 'function') initChessGame();
+        window._liveMode = true;
+        window._liveMyColor = _liveMyColor;
+    }, 400);
+}
+
+function sendLiveMove(move, fen) {
+    if (!_liveWS || !_liveOpponentId || !window._liveMode) return;
+    _liveWS.send(JSON.stringify({
+        type: 'game_move',
+        gameId: _liveGameId,
+        opponentId: _liveOpponentId,
+        move,
+        fen,
+        san: move
+    }));
+}
+
+function applyOpponentMove(move, fen) {
+    if (typeof chessGame !== 'undefined' && move) {
+        try {
+            chessGame.move(move);
+            if (typeof renderBoard2D === 'function') renderBoard2D();
+            if (typeof playMoveSoundForMove === 'function') playMoveSoundForMove(move, chessGame);
+        } catch (e) {}
+    }
+}
+
+function showDrawOffer() {
+    showNotification('Opponent offers a draw. Check the live game panel to respond.', 'info');
+}
+
+function appendLiveChat(senderName, text) {
+    const chatEl = document.getElementById('live-chat-messages');
+    if (!chatEl) return;
+    const msg = document.createElement('div');
+    msg.className = 'text-xs p-2 rounded-lg bg-surface-container-high border border-outline-variant/20';
+    msg.innerHTML = `<strong class="text-secondary">${escapeHTML(senderName)}:</strong> <span class="text-on-surface">${escapeHTML(text)}</span>`;
+    chatEl.appendChild(msg);
+    chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function sendLiveChatMessage() {
+    const input = document.getElementById('live-chat-input');
+    if (!input || !_liveWS || !_liveOpponentId) return;
+    const text = input.value.trim();
+    if (!text) return;
+    _liveWS.send(JSON.stringify({ type: 'chat_message', gameId: _liveGameId, opponentId: _liveOpponentId, text }));
+    appendLiveChat('You', text);
+    input.value = '';
+}
+
+
+
+// ================================================================
+// STUDY / LOGIN STREAK TRACKER
+// ================================================================
+function trackStudyStreak() {
+    const user = getCurrentUser();
+    if (!user) return;
+
+    const key = `studyStreak_${user.id}`;
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    let streak = JSON.parse(localStorage.getItem(key) || '{"count":0,"lastDate":""}');
+
+    if (streak.lastDate === todayStr) return; // Already tracked today
+
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    if (streak.lastDate === yesterdayStr) {
+        streak.count++;
+    } else if (streak.lastDate !== todayStr) {
+        streak.count = 1;
+    }
+
+    streak.lastDate = todayStr;
+    localStorage.setItem(key, JSON.stringify(streak));
+
+    // Show streak badge on dashboard
+    const dashStreakEl = document.getElementById('dash-study-streak');
+    if (dashStreakEl) {
+        dashStreakEl.textContent = `🔥 ${streak.count} day streak`;
+        dashStreakEl.classList.remove('hidden');
+    }
+
+    // Award streak achievements
+    if (streak.count >= 7 && user.badges && !user.badges.includes('streak_week')) {
+        if (typeof updateStudentProgression === 'function') {
+            updateStudentProgression(user.id, 'study_streak_7');
+        }
+    }
+
+    return streak.count;
+}
+
+// Run streak tracker on init
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(trackStudyStreak, 1500);
+});
+
+// ================================================================
+// LIVE GAME INTEGRATION — Show chat on game start
+// ================================================================
+const _origStartLiveGame = window.startLiveGame;
+function startLiveGame_enhanced(msg) {
+    // Show live chat panel
+    const chatWrapper = document.getElementById('live-chat-wrapper');
+    if (chatWrapper) chatWrapper.classList.remove('hidden');
+    startLiveGame(msg);
+}
+
+// ================================================================
+// CLASS RECORDINGS SYSTEM
+// ================================================================
+async function toggleRecordings(scheduleId, btn) {
+    const container = document.getElementById(`recordings-container-${scheduleId}`);
+    if (!container) return;
+
+    if (container.classList.contains('hidden')) {
+        container.classList.remove('hidden');
+        btn.classList.add('bg-secondary/20', 'text-secondary', 'border-secondary/30');
+
+        // Fetch recordings
+        await loadRecordingsList(scheduleId);
+
+        // Show/hide teacher adding section
+        const addBox = document.getElementById(`add-recording-box-${scheduleId}`);
+        if (addBox) {
+            addBox.classList.toggle('hidden', currentUserRole !== 'teacher');
+        }
+    } else {
+        container.classList.add('hidden');
+        btn.classList.remove('bg-secondary/20', 'text-secondary', 'border-secondary/30');
+    }
+}
+
+async function loadRecordingsList(scheduleId) {
+    const list = document.getElementById(`recordings-list-${scheduleId}`);
+    if (!list) return;
+
+    list.innerHTML = `<span class="text-[10px] text-on-surface-variant italic animate-pulse">Loading recordings...</span>`;
+    try {
+        const res = await fetch(`/api/schedules/${scheduleId}/recordings`);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+
+        if (!data.length) {
+            list.innerHTML = `<span class="text-[10px] text-on-surface-variant italic">No recording links added yet.</span>`;
+            return;
+        }
+
+        list.innerHTML = data.map(r => `
+            <div class="flex items-center justify-between p-2 rounded-lg bg-surface-container-high border border-outline-variant/20 gap-2">
+                <a href="${safeUrl(r.recording_url)}" target="_blank" rel="noopener noreferrer" 
+                    class="text-xs text-primary hover:underline font-semibold flex items-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                    <span class="material-symbols-outlined text-[14px]">play_circle</span>
+                    <span>${escapeHTML(r.title || 'Recorded Session')}</span>
+                </a>
+                <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <span class="text-[9px] text-on-surface-variant/60">${new Date(r.recorded_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+                    ${currentUserRole === 'teacher' ? `
+                        <button data-action="deleteRecording" data-schedule-id="${scheduleId}" data-recording-id="${r.id}" class="text-on-surface-variant hover:text-red-400 transition-colors">
+                            <span class="material-symbols-outlined text-xs">delete</span>
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        list.innerHTML = `<span class="text-[10px] text-red-400">Failed to load recordings.</span>`;
+    }
+}
+
+async function saveClassRecording(scheduleId) {
+    const titleInput = document.getElementById(`rec-title-${scheduleId}`);
+    const urlInput = document.getElementById(`rec-url-${scheduleId}`);
+    if (!titleInput || !urlInput) return;
+
+    const title = titleInput.value.trim();
+    const url = urlInput.value.trim();
+    if (!url) return showNotification('Recording URL is required.', 'error');
+
+    try {
+        const res = await fetch(`/api/schedules/${scheduleId}/recordings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ title, recording_url: url })
+        });
+        if (!res.ok) throw new Error(await res.text());
+
+        titleInput.value = '';
+        urlInput.value = '';
+        showNotification('Recording added successfully!', 'success');
+        await loadRecordingsList(scheduleId);
+    } catch (e) {
+        showNotification('Failed to add recording.', 'error');
+    }
+}
+
+async function deleteRecording(scheduleId, id) {
+    if (!confirm('Are you sure you want to delete this recording?')) return;
+    try {
+        const res = await fetch(`/api/schedules/recordings/${id}`, {
+            method: 'DELETE',
+            credentials: 'include'
+        });
+        if (!res.ok) throw new Error();
+        showNotification('Recording deleted.', 'success');
+        await loadRecordingsList(scheduleId);
+    } catch (e) {
+        showNotification('Failed to delete recording.', 'error');
+    }
+}
+
+// ================================================================
+// TOURNAMENT DETAILS & BRACKET FIXTURES GENERATOR
+// ================================================================
+async function toggleTournamentDetails(tournamentId, btn) {
+    const details = document.getElementById(`tournament-details-${tournamentId}`);
+    if (!details) return;
+
+    if (details.classList.contains('hidden')) {
+        details.classList.remove('hidden');
+        btn.classList.add('bg-secondary/20', 'text-secondary', 'border-secondary/30');
+        
+        // Fetch registered players
+        try {
+            const res = await fetch(`/api/tournaments/academy/${tournamentId}/registrations`, { credentials: 'include' });
+            if (!res.ok) throw new Error();
+            const players = await res.json();
+
+            // Populate players list
+            const playersList = document.getElementById(`players-list-${tournamentId}`);
+            if (playersList) {
+                if (!players.length) {
+                    playersList.innerHTML = `<span class="text-[10px] text-on-surface-variant italic">No players registered yet.</span>`;
+                } else {
+                    playersList.innerHTML = players.map(p => `
+                        <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-surface-container-high border border-outline-variant text-on-surface"
+                            title="${p.category || 'Beginner'} · ${p.points} ELO">
+                            👤 ${escapeHTML(p.name)}
+                        </span>
+                    `).join('');
+                }
+            }
+
+            // Generate bracket fixtures
+            const pairingsList = document.getElementById(`pairings-list-${tournamentId}`);
+            if (pairingsList) {
+                if (players.length < 2) {
+                    pairingsList.innerHTML = `<span class="text-[10px] text-on-surface-variant italic">At least 2 players required to build bracket.</span>`;
+                } else {
+                    // Fetch active live games from server
+                    let activeGames = [];
+                    try {
+                        const gamesRes = await fetch('/api/games/active');
+                        if (gamesRes.ok) {
+                            activeGames = await gamesRes.json();
+                        }
+                    } catch (err) {
+                        console.error('Failed to load active games:', err);
+                    }
+
+                    // Generate a deterministic bracket pairings based on player list seed
+                    const roundPairings = generateBracketPairings(players);
+                    pairingsList.innerHTML = roundPairings.map((pair, idx) => {
+                        // Check if these two players have an active live game
+                        const activeMatch = activeGames.find(g => 
+                            (g.whitePlayerId === pair[0].id && g.blackPlayerId === pair[1].id) ||
+                            (g.whitePlayerId === pair[1].id && g.blackPlayerId === pair[0].id)
+                        );
+
+                        const hasBye = pair[1].name && pair[1].name.includes('BYE');
+                        let actionHtml = '';
+
+                        if (hasBye) {
+                            actionHtml = `<span class="px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 text-[8px] font-bold border border-slate-500/20">BYE</span>`;
+                        } else if (activeMatch) {
+                            actionHtml = `
+                                <button data-action="openSpectatorModal" data-game-id="${activeMatch.gameId}" data-white-name="${activeMatch.whitePlayerName.replace(/'/g, "\\'")}" data-black-name="${activeMatch.blackPlayerName.replace(/'/g, "\\'")}" data-fen="${activeMatch.fen}" 
+                                    class="px-2 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded text-[8px] font-bold hover:scale-105 transition-all flex items-center gap-0.5 cursor-pointer">
+                                    <span class="material-symbols-outlined text-[10px]">visibility</span> Watch Live
+                                </button>
+                            `;
+                        } else {
+                            actionHtml = `<span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[8px] font-bold border border-amber-500/20">WAITING</span>`;
+                        }
+
+                        return `
+                            <div class="flex items-center justify-between p-2 rounded-lg bg-surface-container border border-outline-variant/30 text-[10px] gap-2">
+                                <span class="font-bold text-on-surface">Match ${idx + 1}</span>
+                                <div class="flex items-center gap-1.5 flex-1 justify-center text-center">
+                                    <span class="text-secondary font-bold truncate max-w-[70px]">${escapeHTML(pair[0].name)}</span>
+                                    <span class="text-on-surface-variant/40">vs</span>
+                                    <span class="text-primary font-bold truncate max-w-[70px]">${escapeHTML(pair[1].name)}</span>
+                                </div>
+                                ${actionHtml}
+                            </div>
+                        `;
+                    }).join('');
+                }
+            }
+        } catch (e) {
+            showNotification('Failed to load tournament details.', 'error');
+        }
+    } else {
+        details.classList.add('hidden');
+        btn.classList.remove('bg-secondary/20', 'text-secondary', 'border-secondary/30');
+    }
+}
+
+function generateBracketPairings(players) {
+    // Deterministic matchmaking pairing: Sort by ELO, pair high vs low (Swiss/Knockout style)
+    const sorted = [...players].sort((a, b) => b.points - a.points);
+    const pairings = [];
+    
+    // Pair top half vs bottom half
+    const half = Math.floor(sorted.length / 2);
+    for (let i = 0; i < half; i++) {
+        pairings.push([sorted[i], sorted[sorted.length - 1 - i]]);
+    }
+    
+    // If odd count, pair the remaining player with a dummy 'BYE' player
+    if (sorted.length % 2 !== 0) {
+        pairings.push([sorted[half], { name: 'BYE (No Opponent)' }]);
+    }
+    
+    return pairings;
+}

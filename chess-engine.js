@@ -41,8 +41,12 @@ function initChessGame() {
     document.getElementById('chess-status-badge').innerText = 'In Progress';
     document.getElementById('chess-status-badge').className = 'px-3 py-1 bg-amber-500/20 text-secondary border border-secondary/30 rounded-full font-bold text-xs';
 
-    // Reset clock and histories
+    // Reset clock, histories and move streak
     gameHistoryMoves = [];
+    playerMoveStreak = 0;
+    const streakBadge = document.getElementById('move-streak-badge');
+    if (streakBadge) streakBadge.classList.add('hidden');
+
     activeClockPlayer = 'w';
     whiteTime = selectedClockLimit;
     blackTime = selectedClockLimit;
@@ -77,10 +81,29 @@ function initChessGame() {
 }
 
 // 2D Renderer
+function updateOuterBoardCoordinates(boardPrefix, flipped = false) {
+    const ranksEl = document.getElementById(`${boardPrefix}-ranks`);
+    const filesEl = document.getElementById(`${boardPrefix}-files`);
+    if (!ranksEl || !filesEl) return;
+
+    ranksEl.style.alignSelf = 'stretch';
+
+    const files = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    const ranks = ['1', '2', '3', '4', '5', '6', '7', '8'];
+
+    const displayFiles = flipped ? [...files].reverse() : files;
+    const displayRanks = flipped ? ranks : [...ranks].reverse();
+
+    ranksEl.innerHTML = displayRanks.map(r => `<div class="flex-1 flex items-center justify-center">${r}</div>`).join('');
+    filesEl.innerHTML = displayFiles.map(f => `<div class="flex-1 text-center">${f}</div>`).join('');
+}
+
 function renderBoard2D() {
     const boardEl = document.getElementById('chess-board-2d');
     if (!boardEl) return;
     boardEl.innerHTML = '';
+    
+    updateOuterBoardCoordinates('chess-board', boardFlipped);
 
     const board = chessGame.board();
     const columns = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
@@ -122,13 +145,7 @@ function renderBoard2D() {
                 }
             }
 
-            // Add algebraic coordinate label for border cells
-            if ((!boardFlipped && r === 0) || (boardFlipped && r === 7)) {
-                cell.innerHTML += `<span class="absolute bottom-0.5 right-1 text-[9px] font-bold opacity-30">${columns[c]}</span>`;
-            }
-            if ((!boardFlipped && c === 0) || (boardFlipped && c === 7)) {
-                cell.innerHTML += `<span class="absolute top-0.5 left-1 text-[9px] font-bold opacity-30">${r + 1}</span>`;
-            }
+
 
             // Add move hints if selected piece can move here
             if (selectedSquare2D) {
@@ -154,6 +171,17 @@ function renderBoard2D() {
 function handleSquareClick2D(square) {
     if (chessGame.game_over()) return;
     if (arenaGameMode === 'review') return;
+
+    if (window._liveMode) {
+        if (chessGame.turn() !== window._liveMyColor) {
+            showNotification("It is not your turn!", "warning");
+            return;
+        }
+        const piece = chessGame.get(square);
+        if (piece && piece.color !== window._liveMyColor && selectedSquare2D === null) {
+            return; // Can't select opponent pieces
+        }
+    }
 
     // Check if the user is clicking their own piece to select
     const piece = chessGame.get(square);
@@ -187,6 +215,49 @@ function handleSquareClick2D(square) {
     }
 }
 
+let playerMoveStreak = 0;
+function updatePlayerMoveStreak(classification) {
+    if (['Brilliant', 'Best Move', 'Good', 'Book Move'].includes(classification.name)) {
+        playerMoveStreak++;
+    } else {
+        playerMoveStreak = 0;
+    }
+    const streakBadge = document.getElementById('move-streak-badge');
+    if (streakBadge) {
+        if (playerMoveStreak >= 2) {
+            streakBadge.innerText = `🔥 ${playerMoveStreak} Streak`;
+            streakBadge.classList.remove('hidden');
+        } else {
+            streakBadge.classList.add('hidden');
+        }
+    }
+}
+
+function selectBestMoveForGame(game, depth) {
+    const moves = game.moves({ verbose: true });
+    if (moves.length === 0) return null;
+    const isMaximizing = (game.turn() === 'w');
+    let bestVal = isMaximizing ? -Infinity : Infinity;
+    let bestMove = null;
+    moves.forEach(m => {
+        game.move(m);
+        const val = evaluateBoard(game.board());
+        game.undo();
+        if (isMaximizing) {
+            if (val > bestVal) {
+                bestVal = val;
+                bestMove = m;
+            }
+        } else {
+            if (val < bestVal) {
+                bestVal = val;
+                bestMove = m;
+            }
+        }
+    });
+    return bestMove;
+}
+
 function makePlayerMove(from, to) {
     try {
         const move = chessGame.move({
@@ -196,14 +267,26 @@ function makePlayerMove(from, to) {
         });
 
         if (move) {
-            playMoveSound();
+            playMoveSoundForMove(move, chessGame);
             
             // Record game history logs for Post-Game Review
+            const currentEval = getPositionEvalScore();
             gameHistoryMoves.push({
                 fen: chessGame.fen(),
                 move: move,
-                eval: getPositionEvalScore()
+                eval: currentEval
             });
+
+            // Calculate live move streak
+            const lastMoveIdx = gameHistoryMoves.length - 1;
+            const prevEval = lastMoveIdx > 0 ? gameHistoryMoves[lastMoveIdx - 1].eval : 0;
+            const classification = classifyMove(prevEval, currentEval, move);
+            updatePlayerMoveStreak(classification);
+
+            // If in WS Live mode, transmit move to opponent
+            if (window._liveMode && typeof sendLiveMove === 'function') {
+                sendLiveMove(move.san, chessGame.fen());
+            }
 
             checkGameStatus();
             return move;
@@ -214,34 +297,26 @@ function makePlayerMove(from, to) {
     return null;
 }
 
-// Simple MiniMax AI
-// Simple MiniMax AI
+// Optimized Minimax AI with Move Ordering and correct perspective
 function makeAIMove() {
     if (chessGame.game_over()) return;
-
-    const moves = chessGame.moves({ verbose: true });
-    if (moves.length === 0) return;
 
     let selectedMove = null;
 
     if (aiLevel === 'easy') {
-        // Easy AI: plays depth 1 search, with a 30% chance of random moves to keep it easy
-        if (Math.random() < 0.3) {
-            selectedMove = moves[Math.floor(Math.random() * moves.length)];
-        } else {
-            selectedMove = selectBestMove(1);
-        }
-    } else if (aiLevel === 'medium') {
-        // Medium difficulty translates to a strong "Hard" (Minimax depth 2 + Positional PST)
+        // Easy AI: Depth 2 search (Fast & moderate)
         selectedMove = selectBestMove(2);
-    } else if (aiLevel === 'hard') {
-        // Hard difficulty translates to an advanced "Very Hard" (Minimax depth 3 + Positional PST)
+    } else if (aiLevel === 'medium') {
+        // Medium AI: Depth 3 search (Fast & challenging)
         selectedMove = selectBestMove(3);
+    } else if (aiLevel === 'hard') {
+        // Hard AI: Depth 4 search (Very strong / Grandmaster level)
+        selectedMove = selectBestMove(4);
     }
 
     if (selectedMove) {
         chessGame.move(selectedMove);
-        playMoveSound();
+        playMoveSoundForMove(selectedMove, chessGame);
 
         if (gameMode === '3D') {
             updateBoard3D();
@@ -259,25 +334,51 @@ function selectBestMove(depth) {
     const moves = chessGame.moves({ verbose: true });
     if (moves.length === 0) return null;
 
-    let bestVal = -Infinity;
-    let bestMoves = [];
+    const aiColor = chessGame.turn(); // 'w' or 'b'
+    const isAiMaximizing = (aiColor === 'w');
 
-    moves.forEach(m => {
+    // Order moves for alpha-beta efficiency (MVV-LVA)
+    const orderedMoves = orderMoves(moves);
+
+    let bestVal = isAiMaximizing ? -Infinity : Infinity;
+    const moveEvaluations = [];
+
+    orderedMoves.forEach(m => {
         chessGame.move(m);
-        // We are evaluating from Black's (AI's) perspective, so we negate the evaluation score
-        let val = -evaluateBoard(chessGame.board());
-        val = minimax(depth - 1, -Infinity, Infinity, false);
+        // After AI's move, it is the opponent's turn.
+        // If AI is White (maximizing), then opponent is Black (minimizing, so isMaximizing = false).
+        // If AI is Black (minimizing), then opponent is White (maximizing, so isMaximizing = true).
+        const val = minimax(depth - 1, -Infinity, Infinity, !isAiMaximizing);
         chessGame.undo();
 
-        if (val > bestVal) {
-            bestVal = val;
-            bestMoves = [m];
-        } else if (val === bestVal) {
-            bestMoves.push(m);
+        moveEvaluations.push({ move: m, val: val });
+
+        if (isAiMaximizing) {
+            if (val > bestVal) bestVal = val;
+        } else {
+            if (val < bestVal) bestVal = val;
         }
     });
 
-    return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+    // Score tolerance based on difficulty (allows variation while staying strong)
+    // Easy: within 30 points (0.3 pawns)
+    // Medium: within 15 points (0.15 pawns)
+    // Hard: within 5 points (0.05 pawns)
+    let tolerance = 15;
+    if (aiLevel === 'easy') tolerance = 30;
+    else if (aiLevel === 'hard') tolerance = 5;
+
+    // Filter candidate moves within the tolerance
+    const candidateMoves = moveEvaluations.filter(item => {
+        if (isAiMaximizing) {
+            return (bestVal - item.val) <= tolerance;
+        } else {
+            return (item.val - bestVal) <= tolerance;
+        }
+    }).map(item => item.move);
+
+    // Pick randomly from the candidates to introduce variety
+    return candidateMoves[Math.floor(Math.random() * candidateMoves.length)];
 }
 
 // Alpha-Beta Minimax Evaluation
@@ -287,11 +388,12 @@ function minimax(depth, alpha, beta, isMaximizing) {
     }
 
     const moves = chessGame.moves({ verbose: true });
+    const orderedMoves = orderMoves(moves);
 
     if (isMaximizing) {
         let maxEval = -Infinity;
-        for (let i = 0; i < moves.length; i++) {
-            chessGame.move(moves[i]);
+        for (let i = 0; i < orderedMoves.length; i++) {
+            chessGame.move(orderedMoves[i]);
             let score = minimax(depth - 1, alpha, beta, false);
             chessGame.undo();
             maxEval = Math.max(maxEval, score);
@@ -301,8 +403,8 @@ function minimax(depth, alpha, beta, isMaximizing) {
         return maxEval;
     } else {
         let minEval = Infinity;
-        for (let i = 0; i < moves.length; i++) {
-            chessGame.move(moves[i]);
+        for (let i = 0; i < orderedMoves.length; i++) {
+            chessGame.move(orderedMoves[i]);
             let score = minimax(depth - 1, alpha, beta, true);
             chessGame.undo();
             minEval = Math.min(minEval, score);
@@ -311,6 +413,21 @@ function minimax(depth, alpha, beta, isMaximizing) {
         }
         return minEval;
     }
+}
+
+// Highly optimized O(N) move ordering: partition checks, captures, and promotions
+function orderMoves(moves) {
+    const captures = [];
+    const others = [];
+    for (let i = 0; i < moves.length; i++) {
+        const m = moves[i];
+        if (m.captured || m.promotion || (m.san && m.san.includes('+'))) {
+            captures.push(m);
+        } else {
+            others.push(m);
+        }
+    }
+    return captures.concat(others);
 }
 
 // Basic Chess Piece Valuations (scaled by 10)
@@ -405,28 +522,153 @@ function evaluateBoard(board) {
     return score;
 }
 
+let soundEnabled = (localStorage.getItem('arena_sound_enabled') !== 'false');
+
+function toggleArenaSound() {
+    soundEnabled = !soundEnabled;
+    localStorage.setItem('arena_sound_enabled', soundEnabled ? 'true' : 'false');
+    const btn = document.getElementById('arena-sound-toggle-btn');
+    if (btn) {
+        btn.innerText = soundEnabled ? 'Enabled' : 'Disabled';
+        btn.className = soundEnabled 
+            ? 'px-4 py-1.5 bg-secondary text-on-secondary rounded-lg text-xs font-bold transition-all shadow hover:bg-secondary/90'
+            : 'px-4 py-1.5 bg-surface-container-high text-on-surface border border-outline-variant hover:bg-surface-variant/30 text-xs font-bold rounded-lg transition-all';
+    }
+    showNotification(`Sound effects ${soundEnabled ? 'enabled' : 'disabled'}`, 'info');
+}
+
 // Audio feedback
-function playMoveSound() {
+function playMoveSound(type = 'move') {
+    if (!soundEnabled) return;
     try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        const gainNode = audioCtx.createGain();
 
-        osc.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
+        
+        if (type === 'capture') {
+            // Crisp wooden knock + short white noise burst for capture impact
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(120, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(240, audioCtx.currentTime + 0.12);
+            gainNode.gain.setValueAtTime(0.35, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.12);
 
-        // Simple crisp wood hit synth
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(150, audioCtx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(300, audioCtx.currentTime + 0.08);
+            const bufferSize = audioCtx.sampleRate * 0.035;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+            const noiseFilter = audioCtx.createBiquadFilter();
+            noiseFilter.type = 'bandpass';
+            noiseFilter.frequency.value = 600;
+            const noiseGain = audioCtx.createGain();
+            noiseGain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            noiseGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.035);
+            noise.connect(noiseFilter);
+            noiseFilter.connect(noiseGain);
+            noiseGain.connect(audioCtx.destination);
+            noise.start();
+        } 
+        else if (type === 'check') {
+            // Double quick bell chime
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
 
-        gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(1000, audioCtx.currentTime + 0.06);
+            gainNode.gain.setValueAtTime(0.12, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.18);
+        }
+        else if (type === 'gameover') {
+            // Heavy low-frequency frequency sweep
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
 
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.1);
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(180, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(60, audioCtx.currentTime + 0.35);
+            gainNode.gain.setValueAtTime(0.18, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.35);
+        }
+        else if (type === 'tick') {
+            // Soft high click
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1800, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.012);
+            gainNode.gain.setValueAtTime(0.02, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.012);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.012);
+        }
+        else if (type === 'lowtime') {
+            // High chime warning beep
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1100, audioCtx.currentTime);
+            gainNode.gain.setValueAtTime(0.06, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.07);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.07);
+        }
+        else {
+            // Standard move (default): Crisp wooden tap
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(300, audioCtx.currentTime + 0.08);
+
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        }
     } catch (err) {
         // Sound failure safety
+    }
+}
+
+function playMoveSoundForMove(move, gameRef = chessGame) {
+    if (!move) return;
+    if (gameRef.game_over()) {
+        playMoveSound('gameover');
+    } else if (gameRef.in_check()) {
+        playMoveSound('check');
+    } else if (move.captured || (typeof move.san === 'string' && move.san.includes('x'))) {
+        playMoveSound('capture');
+    } else {
+        playMoveSound('move');
     }
 }
 
@@ -498,7 +740,7 @@ function changeDifficulty(level) {
             if (l === level) {
                 btn.className = 'py-2 rounded-xl text-xs font-semibold bg-secondary/10 text-secondary border border-secondary/30 transition-all';
             } else {
-                btn.className = 'py-2 rounded-xl text-xs font-semibold bg-[#1a1c1d] border border-outline-variant hover:bg-surface-variant/30 transition-all hover:border-secondary';
+                btn.className = 'py-2 rounded-xl text-xs font-semibold bg-surface-container-high text-on-surface border border-outline-variant hover:bg-surface-variant/30 transition-all hover:border-secondary';
             }
         }
     });
@@ -872,6 +1114,17 @@ function on3DClick(event) {
 function handleSquareClick3D(square) {
     if (chessGame.game_over()) return;
     if (arenaGameMode === 'review') return;
+
+    if (window._liveMode) {
+        if (chessGame.turn() !== window._liveMyColor) {
+            showNotification("It is not your turn!", "warning");
+            return;
+        }
+        const piece = chessGame.get(square);
+        if (piece && piece.color !== window._liveMyColor && selectedSquare3D === null) {
+            return; // Can't select opponent pieces
+        }
+    }
 
     const piece = chessGame.get(square);
     const isUserPiece = piece && piece.color === chessGame.turn();
@@ -1401,6 +1654,8 @@ function renderPuzzleBoard() {
     const boardEl = document.getElementById('puzzle-board');
     if (!boardEl) return;
     boardEl.innerHTML = '';
+    
+    updateOuterBoardCoordinates('puzzle-board', false);
 
     const board = puzzleGame.board();
     const columns = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
@@ -1475,12 +1730,12 @@ function handlePuzzleSquareClick(square) {
         const moveAttempt = `${selectedPuzzleSquare}-${square}`;
         
         if (moveAttempt === puzzle.solution) {
-            puzzleGame.move({
+            const move = puzzleGame.move({
                 from: selectedPuzzleSquare,
                 to: square,
                 promotion: 'q'
             });
-            playMoveSound();
+            playMoveSoundForMove(move, puzzleGame);
             selectedPuzzleSquare = null;
             renderPuzzleBoard();
             
@@ -1674,7 +1929,7 @@ function changeBoardSkin(skin) {
             if (s === skin) {
                 btn.className = 'skin-btn py-2 rounded-xl text-xs font-semibold bg-secondary text-on-secondary border border-secondary/30 transition-all cursor-pointer';
             } else {
-                btn.className = 'skin-btn py-2 rounded-xl text-xs font-semibold bg-[#1a1c1d] border border-outline-variant hover:bg-surface-variant/30 transition-all cursor-pointer';
+                btn.className = 'skin-btn py-2 rounded-xl text-xs font-semibold bg-surface-container-high text-on-surface border border-outline-variant hover:bg-surface-variant/30 transition-all cursor-pointer';
             }
         }
     });
@@ -1723,7 +1978,7 @@ function selectClockPreset(seconds) {
             if (p === seconds) {
                 btn.className = 'clock-preset-btn py-2 bg-secondary text-on-secondary rounded-xl text-xs font-semibold transition-all';
             } else {
-                btn.className = 'clock-preset-btn py-2 bg-[#1a1c1d] border border-outline-variant hover:bg-surface-variant/30 text-xs font-semibold rounded-xl transition-all';
+                btn.className = 'clock-preset-btn py-2 bg-surface-container-high text-on-surface border border-outline-variant hover:bg-surface-variant/30 text-xs font-semibold rounded-xl transition-all';
             }
         }
     });
@@ -1751,8 +2006,10 @@ function startChessClock() {
     if (clockTimerInterval) clearInterval(clockTimerInterval);
     
     clockTimerInterval = setInterval(() => {
+        let activeTime = 0;
         if (activeClockPlayer === 'w') {
             whiteTime--;
+            activeTime = whiteTime;
             document.getElementById('timer-txt-white').innerText = formatTime(whiteTime);
             document.getElementById('clock-card-white').className = 'p-3 bg-secondary/20 rounded-xl border border-secondary text-center transition-all duration-300';
             document.getElementById('clock-card-black').className = 'p-3 bg-black/60 rounded-xl border border-outline-variant/20 text-center transition-all duration-300';
@@ -1761,11 +2018,20 @@ function startChessClock() {
             }
         } else {
             blackTime--;
+            activeTime = blackTime;
             document.getElementById('timer-txt-black').innerText = formatTime(blackTime);
             document.getElementById('clock-card-black').className = 'p-3 bg-secondary/20 rounded-xl border border-secondary text-center transition-all duration-300';
             document.getElementById('clock-card-white').className = 'p-3 bg-black/60 rounded-xl border border-outline-variant/20 text-center transition-all duration-300';
             if (blackTime <= 0) {
                 handleTimeout('b');
+            }
+        }
+
+        if (activeTime > 0) {
+            if (activeTime <= 15) {
+                playMoveSound('lowtime');
+            } else {
+                playMoveSound('tick');
             }
         }
     }, 1000);
@@ -1810,6 +2076,16 @@ function changeArenaMode(mode) {
     const clocksCard = document.getElementById('arena-clocks-card');
     const reviewCard = document.getElementById('arena-review-card');
     const evalContainer = document.getElementById('arena-eval-bar-container');
+    const difficultySection = document.getElementById('arena-difficulty-section');
+
+    // Show/hide difficulty only for VS Computer mode
+    if (difficultySection) {
+        if (mode === 'vs-computer') {
+            difficultySection.classList.remove('hidden');
+        } else {
+            difficultySection.classList.add('hidden');
+        }
+    }
 
     if (mode === 'review') {
         clockSelector.classList.add('hidden');
@@ -1833,6 +2109,7 @@ function changeArenaMode(mode) {
     }
     showNotification(`Arena Mode switched to: ${mode.replace('-', ' ').toUpperCase()}`, "info");
 }
+
 
 // ==========================================
 // POST-GAME REVIEW & EVALUATIONS MODULE
@@ -1884,6 +2161,8 @@ function initReviewMode() {
     document.getElementById('arena-eval-bar-white').style.height = '50%';
     document.getElementById('arena-eval-bar-black').style.height = '50%';
     document.getElementById('arena-eval-bar-text').innerText = '+0.0';
+
+    if (typeof renderAdvantageGraph === 'function') renderAdvantageGraph();
 }
 
 function navigateReview(action) {
@@ -1902,6 +2181,113 @@ function navigateReview(action) {
         reviewIndex = reviewMoves.length;
     }
 
+    jumpToReviewIndex(reviewIndex);
+}
+
+function renderAdvantageGraph() {
+    const svg = document.getElementById('review-svg-graph');
+    if (!svg) return;
+
+    // Clear dynamic elements
+    const dynamicElements = svg.querySelectorAll('path, circle, rect:not([id])');
+    dynamicElements.forEach(el => el.remove());
+
+    if (reviewMoves.length === 0) return;
+
+    const W = 500;
+    const H = 100;
+    const padding = 10;
+    const graphWidth = W - padding * 2;
+
+    const points = [];
+    points.push({ x: padding, y: 50, eval: 0, moveName: 'Start', classification: null, index: 0 });
+
+    for (let i = 0; i < reviewMoves.length; i++) {
+        const m = reviewMoves[i];
+        const evalVal = m.eval || 0;
+        const x = padding + ((i + 1) / reviewMoves.length) * graphWidth;
+        const y = Math.max(5, Math.min(95, 50 - (evalVal * 4.5)));
+        
+        let classification = null;
+        if (i > 0) {
+            classification = classifyMove(reviewMoves[i - 1].eval, evalVal, m.move);
+        } else {
+            classification = classifyMove(0, evalVal, m.move);
+        }
+
+        points.push({
+            x,
+            y,
+            eval: evalVal,
+            moveName: m.move.san,
+            classification,
+            index: i + 1
+        });
+    }
+
+    // Generate Path string
+    let pathD = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length; i++) {
+        pathD += ` L ${points[i].x} ${points[i].y}`;
+    }
+
+    // Generate Area fill string (for gradient)
+    let areaD = `${pathD} L ${points[points.length - 1].x} 50 L ${points[0].x} 50 Z`;
+
+    // Create area path
+    const areaPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    areaPath.setAttribute('d', areaD);
+    areaPath.setAttribute('fill', 'url(#eval-gradient)');
+    svg.appendChild(areaPath);
+
+    // Create line path
+    const linePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    linePath.setAttribute('d', pathD);
+    linePath.setAttribute('fill', 'none');
+    linePath.setAttribute('stroke', 'var(--color-secondary)');
+    linePath.setAttribute('stroke-width', '2');
+    svg.appendChild(linePath);
+
+    // Add interactive circle nodes
+    points.forEach((pt) => {
+        let dotColor = '#ffffff';
+        if (pt.classification) {
+            if (pt.classification.name === 'Brilliant') dotColor = '#22d3ee'; // cyan
+            else if (pt.classification.name === 'Best Move') dotColor = '#10b981'; // emerald
+            else if (pt.classification.name === 'Inaccuracy') dotColor = '#fbbf24'; // amber
+            else if (pt.classification.name === 'Blunder') dotColor = '#f87171'; // red
+        }
+
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', pt.x);
+        circle.setAttribute('cy', pt.y);
+        circle.setAttribute('r', pt.index === reviewIndex ? '4.5' : '3.5');
+        circle.setAttribute('fill', dotColor);
+        circle.setAttribute('stroke', pt.index === reviewIndex ? 'var(--color-secondary)' : 'rgba(0,0,0,0.5)');
+        circle.setAttribute('stroke-width', pt.index === reviewIndex ? '2' : '1');
+        circle.style.cursor = 'pointer';
+
+        const evalSign = pt.eval >= 0 ? '+' : '';
+        const toolTxt = `Move ${pt.index}: ${pt.moveName} (${evalSign}${pt.eval.toFixed(1)}) ${pt.classification ? pt.classification.name : ''}`;
+        circle.setAttribute('data-tooltip', toolTxt);
+        circle.addEventListener('mouseover', (e) => {
+            window.showGlobalTooltip(e, toolTxt);
+        });
+        circle.addEventListener('mouseout', () => {
+            window.hideGlobalTooltip();
+        });
+
+        // Click to seek move index
+        circle.addEventListener('click', () => {
+            jumpToReviewIndex(pt.index);
+        });
+
+        svg.appendChild(circle);
+    });
+}
+
+function jumpToReviewIndex(idx) {
+    reviewIndex = idx;
     document.getElementById('arena-review-move-txt').innerText = `Move ${reviewIndex} / ${reviewMoves.length}`;
 
     const tempGame = new Chess();
@@ -1933,27 +2319,52 @@ function navigateReview(action) {
         
         const destCell = document.querySelector(`#chess-board-2d > div[data-square="${lastMove.to}"]`);
         if (destCell) {
+            // Remove previous badges
+            const prevBadge = destCell.querySelector('.move-classification-badge');
+            if (prevBadge) prevBadge.remove();
+
             const classification = classifyMove(prevEval, currentEval, lastMove);
             const badge = document.createElement('div');
-            badge.className = `absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center border text-[10px] font-bold shadow-md ${classification.color}`;
+            badge.className = `move-classification-badge absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center border text-[10px] font-bold shadow-md ${classification.color}`;
             badge.innerHTML = `<span class="material-symbols-outlined text-[10px]">${classification.symbol}</span>`;
             badge.title = classification.name;
             destCell.appendChild(badge);
-        }
 
+            // Blunder Highlighter: Highlight the actual best move squares if current move was suboptimal
+            if (['Inaccuracy', 'Mistake', 'Blunder'].includes(classification.name)) {
+                const searchGame = new Chess();
+                for (let i = 0; i < reviewIndex - 1; i++) {
+                    searchGame.move(reviewMoves[i].move);
+                }
+                const bestMove = selectBestMoveForGame(searchGame, 2);
+                if (bestMove) {
+                    cells.forEach(c => {
+                        if (c.dataset.square === bestMove.from || c.dataset.square === bestMove.to) {
+                            c.className += ' border-2 border-dashed border-amber-500 bg-amber-500/5';
+                        }
+                    });
+                    document.getElementById('chess-status').innerHTML = `Replayed: ${lastMove.san} <span class="text-amber-500 font-bold block text-[10px] mt-0.5">💡 Missed Best Move: ${bestMove.san}</span>`;
+                } else {
+                    document.getElementById('chess-status').innerText = `Replayed: ${lastMove.san}`;
+                }
+            } else {
+                document.getElementById('chess-status').innerText = `Replayed: ${lastMove.san}`;
+            }
+        }
+        
         let whitePct = 50 + (currentEval * 10);
         whitePct = Math.max(5, Math.min(95, whitePct));
         document.getElementById('arena-eval-bar-white').style.height = `${whitePct}%`;
         document.getElementById('arena-eval-bar-black').style.height = `${100 - whitePct}%`;
         document.getElementById('arena-eval-bar-text').innerText = (currentEval >= 0 ? '+' : '') + currentEval.toFixed(1);
-        
-        document.getElementById('chess-status').innerText = `Replayed: ${lastMove.san}`;
     } else {
         document.getElementById('chess-status').innerText = 'Start of game.';
         document.getElementById('arena-eval-bar-white').style.height = '50%';
         document.getElementById('arena-eval-bar-black').style.height = '50%';
         document.getElementById('arena-eval-bar-text').innerText = '+0.0';
     }
+
+    renderAdvantageGraph();
 }
 
 // ==========================================
@@ -1966,7 +2377,7 @@ let visionTargetSquare = null;
 let visionInterval = null;
 
 const ALL_COORDINATES = [];
-const cols = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+const cols = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 for (let r = 1; r <= 8; r++) {
     cols.forEach(c => {
         ALL_COORDINATES.push(c + r);
@@ -1998,8 +2409,10 @@ function renderVisionBoard() {
     const boardEl = document.getElementById('vision-board');
     if (!boardEl) return;
     boardEl.innerHTML = '';
+    
+    updateOuterBoardCoordinates('vision-board', false);
 
-    const columns = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const columns = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 
     for (let r = 7; r >= 0; r--) {
         for (let c = 0; c < 8; c++) {
@@ -2014,14 +2427,9 @@ function renderVisionBoard() {
             cell.style.backgroundColor = isDark ? skinColors.dark : skinColors.light;
             cell.style.color = isDark ? skinColors.darkText : skinColors.lightText;
             
-            if (r === 0) {
-                cell.innerHTML += `<span class="absolute bottom-0.5 right-1 text-[9px] font-bold opacity-30">${columns[c]}</span>`;
-            }
-            if (c === 0) {
-                cell.innerHTML += `<span class="absolute top-0.5 left-1 text-[9px] font-bold opacity-30">${r + 1}</span>`;
-            }
+
             
-            cell.onclick = () => handleVisionSquareClick(squareName);
+            cell.onclick = () => handleVisionSquareClick(squareName, cell);
             boardEl.appendChild(cell);
         }
     }
@@ -2056,10 +2464,10 @@ function nextVisionTarget() {
     document.getElementById('vision-target-txt').innerText = visionTargetSquare.toUpperCase();
 }
 
-function handleVisionSquareClick(square) {
+function handleVisionSquareClick(square, cellElement) {
     if (!visionActive) return;
     
-    const cell = document.querySelector(`#vision-board > div[data-square="${square}"]`);
+    const cell = cellElement || document.querySelector(`#vision-board > div[data-square="${square}"]`);
     
     if (square === visionTargetSquare) {
         visionScore++;
@@ -2075,6 +2483,7 @@ function handleVisionSquareClick(square) {
         
         nextVisionTarget();
     } else {
+        playMoveSound('lowtime');
         if (cell) {
             cell.classList.add('bg-red-500/40');
             setTimeout(() => {
@@ -2154,6 +2563,362 @@ const OPENINGS = [
             { from: "d7", to: "d5", hint: "Mirror match d5", color: "b" },
             { from: "c2", to: "c4", hint: "Offer Gambit c4 pawn", color: "w" }
         ]
+    },
+    {
+        id: "OP-004",
+        title: "French Defense",
+        description: "Black sets up an e6 block, fighting for the center with a later d5. It often leads to closed, strategic games.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Move White Pawn to e4", color: "w" },
+            { from: "e7", to: "e6", hint: "French signature e6", color: "b" },
+            { from: "d2", to: "d4", hint: "Establish center with d4", color: "w" },
+            { from: "d7", to: "d5", hint: "Challenge e4 with d5", color: "b" }
+        ]
+    },
+    {
+        id: "OP-005",
+        title: "Caro-Kann Defense",
+        description: "A solid response to 1.e4. Similar to the French but Black keeps the light-squared bishop free by playing c6 first.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Move White Pawn to e4", color: "w" },
+            { from: "c7", to: "c6", hint: "Caro-Kann signature c6", color: "b" },
+            { from: "d2", to: "d4", hint: "Establish center with d4", color: "w" },
+            { from: "d7", to: "d5", hint: "Challenge e4 with d5", color: "b" }
+        ]
+    },
+    {
+        id: "OP-006",
+        title: "King's Indian Defense",
+        description: "A hypermodern defense. Black allows White to build a large pawn center, planning to counterattack it later.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Move Queen Pawn to d4", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "c2", to: "c4", hint: "Develop c4 pawn", color: "w" },
+            { from: "g7", to: "g6", hint: "Prepare Kingside fianchetto", color: "b" },
+            { from: "b1", to: "c3", hint: "Develop Knight to c3", color: "w" },
+            { from: "f8", to: "g7", hint: "Fianchetto Bishop to g7", color: "b" }
+        ]
+    },
+    {
+        id: "OP-007",
+        title: "Italian Game",
+        description: "One of the oldest openings. White immediately targets Black's vulnerable f7 square with the light-squared bishop.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Move White Pawn to e4", color: "w" },
+            { from: "e7", to: "e5", hint: "Symmetrical center e5", color: "b" },
+            { from: "g1", to: "f3", hint: "Develop Knight to f3", color: "w" },
+            { from: "b8", to: "c6", hint: "Develop Knight to c6", color: "b" },
+            { from: "f1", to: "c4", hint: "Italian Bishop to c4", color: "w" }
+        ]
+    },
+    {
+        id: "OP-008",
+        title: "Scandinavian Defense",
+        description: "Black immediately challenges White's e4 pawn. It leads to open lines and active piece play for both sides.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Move White Pawn to e4", color: "w" },
+            { from: "d7", to: "d5", hint: "Scandinavian signature d5", color: "b" }
+        ]
+    },
+    {
+        id: "OP-009",
+        title: "Nimzo-Indian Defense",
+        description: "A highly respected defense. Black pins White's c3 knight, stopping White from immediately playing e4.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Move Queen Pawn to d4", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "c2", to: "c4", hint: "Develop c4 pawn", color: "w" },
+            { from: "e7", to: "e6", hint: "Open path for dark-squared bishop", color: "b" },
+            { from: "b1", to: "c3", hint: "Develop Knight to c3", color: "w" },
+            { from: "f8", to: "b4", hint: "Pin c3 Knight with Bb4", color: "b" }
+        ]
+    },
+    {
+        id: "OP-010",
+        title: "King's Gambit",
+        description: "An aggressive romantic opening. White sacrifices the f2 pawn to rapidly open the f-file and seize the center.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "e7", to: "e5", hint: "Mirror the center", color: "b" },
+            { from: "f2", to: "f4", hint: "King's Gambit – offer f4 pawn", color: "w" }
+        ]
+    },
+    {
+        id: "OP-011",
+        title: "Pirc Defense",
+        description: "A hypermodern defense. Black allows White to build a strong center, then attacks it with pieces and pawns from the flanks.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "d7", to: "d6", hint: "Pirc signature d6", color: "b" },
+            { from: "d2", to: "d4", hint: "Expand center with d4", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "b1", to: "c3", hint: "Develop Knight to c3", color: "w" },
+            { from: "g7", to: "g6", hint: "Fianchetto setup", color: "b" }
+        ]
+    },
+    {
+        id: "OP-012",
+        title: "Dutch Defense",
+        description: "Black immediately fights for the kingside with f5. A creative choice popular among attacking players.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Advance Queen Pawn", color: "w" },
+            { from: "f7", to: "f5", hint: "Dutch signature f5", color: "b" }
+        ]
+    },
+    {
+        id: "OP-013",
+        title: "Grünfeld Defense",
+        description: "A dynamic defense where Black surrenders the center, then attacks it with pieces and the c5/d5 breaks.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Advance Queen Pawn", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "c2", to: "c4", hint: "Develop c4 pawn", color: "w" },
+            { from: "g7", to: "g6", hint: "Prepare fianchetto", color: "b" },
+            { from: "b1", to: "c3", hint: "Develop Knight to c3", color: "w" },
+            { from: "d7", to: "d5", hint: "Grünfeld pawn strike d5", color: "b" }
+        ]
+    },
+    {
+        id: "OP-014",
+        title: "English Opening",
+        description: "A flexible, positional opening. White controls the center from the flank with c4, delaying a direct central confrontation.",
+        moves: [
+            { from: "c2", to: "c4", hint: "English signature c4", color: "w" },
+            { from: "e7", to: "e5", hint: "Claim the center", color: "b" }
+        ]
+    },
+    {
+        id: "OP-015",
+        title: "London System",
+        description: "A solid, systematic setup. White develops Nf3, Bf4, and e3 to build a robust structure without conceding central tension early.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Advance Queen Pawn", color: "w" },
+            { from: "d7", to: "d5", hint: "Control the center", color: "b" },
+            { from: "g1", to: "f3", hint: "Develop Knight to f3", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "c1", to: "f4", hint: "London Bishop to f4", color: "w" }
+        ]
+    },
+    {
+        id: "OP-016",
+        title: "Slav Defense",
+        description: "A solid reply to the Queen's Gambit. Black supports the d5 pawn with c6 while keeping the light-squared bishop free.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Advance Queen Pawn", color: "w" },
+            { from: "d7", to: "d5", hint: "Mirror d5", color: "b" },
+            { from: "c2", to: "c4", hint: "Queen's Gambit offer", color: "w" },
+            { from: "c7", to: "c6", hint: "Slav signature c6", color: "b" }
+        ]
+    },
+    {
+        id: "OP-017",
+        title: "Vienna Game",
+        description: "White develops the c3 knight early, supporting an eventual e4-e5 push or f4 advance for an aggressive center attack.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "e7", to: "e5", hint: "Mirror the center", color: "b" },
+            { from: "b1", to: "c3", hint: "Vienna signature Nc3", color: "w" }
+        ]
+    },
+    {
+        id: "OP-018",
+        title: "Catalan Opening",
+        description: "White combines the Queen's Gambit with a kingside fianchetto, exerting long-term pressure on the d5-e4 diagonal.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Advance Queen Pawn", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "c2", to: "c4", hint: "Develop c4 pawn", color: "w" },
+            { from: "e7", to: "e6", hint: "Solid center with e6", color: "b" },
+            { from: "g2", to: "g3", hint: "Catalan fianchetto setup", color: "w" }
+        ]
+    },
+    {
+        id: "OP-019",
+        title: "Modern Benoni",
+        description: "Black allows a powerful White center, then creates counterplay on the queenside and with piece activity.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Advance Queen Pawn", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "c2", to: "c4", hint: "Develop c4 pawn", color: "w" },
+            { from: "c7", to: "c5", hint: "Benoni signature c5", color: "b" },
+            { from: "d4", to: "d5", hint: "Advance pawn to d5", color: "w" }
+        ]
+    },
+    {
+        id: "OP-020",
+        title: "Petroff Defense",
+        description: "A sound and solid response to 1.e4. Black mirrors White's knight development, seeking early symmetry.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "e7", to: "e5", hint: "Mirror the center", color: "b" },
+            { from: "g1", to: "f3", hint: "Develop Knight to f3", color: "w" },
+            { from: "g8", to: "f6", hint: "Petroff – mirror Nf6", color: "b" }
+        ]
+    },
+    {
+        id: "OP-021",
+        title: "Trompowsky Attack",
+        description: "White immediately pins Black's knight on f6 with the bishop, creating unusual structures and disrupting Black's typical plans.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Advance Queen Pawn", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "c1", to: "g5", hint: "Trompowsky – Bg5 pin", color: "w" }
+        ]
+    },
+    {
+        id: "OP-022",
+        title: "Alekhine's Defense",
+        description: "Black invites White to chase the knight and over-extend the center. A daring hypermodern counterattack strategy.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "g8", to: "f6", hint: "Alekhine – Knight provokes e4", color: "b" },
+            { from: "e4", to: "e5", hint: "Chase the Knight", color: "w" },
+            { from: "f6", to: "d5", hint: "Retreat Knight to d5", color: "b" }
+        ]
+    },
+    {
+        id: "OP-023",
+        title: "Benko Gambit",
+        description: "Black sacrifices a queenside pawn to gain long-term queenside pressure and open files against White's king.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Advance Queen Pawn", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "c2", to: "c4", hint: "Develop c4 pawn", color: "w" },
+            { from: "c7", to: "c5", hint: "Pressure center with c5", color: "b" },
+            { from: "d4", to: "d5", hint: "Advance to d5", color: "w" },
+            { from: "b7", to: "b5", hint: "Benko Gambit – offer b5 pawn", color: "b" }
+        ]
+    },
+    {
+        id: "OP-024",
+        title: "Modern Defense",
+        description: "Black develops the kingside bishop via g6 and g7 without committing a pawn to the center immediately.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "g7", to: "g6", hint: "Modern signature g6", color: "b" },
+            { from: "d2", to: "d4", hint: "Expand to d4", color: "w" },
+            { from: "f8", to: "g7", hint: "Fianchetto Bishop to g7", color: "b" }
+        ]
+    },
+    {
+        id: "OP-025",
+        title: "Réti Opening",
+        description: "A hypermodern approach. White fianchettoes the kingside bishop, controls d5 from the flank rather than directly.",
+        moves: [
+            { from: "g1", to: "f3", hint: "Réti signature Nf3", color: "w" },
+            { from: "d7", to: "d5", hint: "Claim the center", color: "b" },
+            { from: "g2", to: "g3", hint: "Prepare kingside fianchetto", color: "w" }
+        ]
+    },
+    {
+        id: "OP-026",
+        title: "Bishop's Opening",
+        description: "An early Bc4 development that targets f7. Often transposes to the Italian Game or other e4 openings.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "e7", to: "e5", hint: "Mirror the center", color: "b" },
+            { from: "f1", to: "c4", hint: "Bishop's Opening – Bc4", color: "w" }
+        ]
+    },
+    {
+        id: "OP-027",
+        title: "Four Knights Game",
+        description: "Both sides develop both knights to their best squares. A classical and symmetrical development.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "e7", to: "e5", hint: "Mirror the center", color: "b" },
+            { from: "g1", to: "f3", hint: "Develop Knight to f3", color: "w" },
+            { from: "b8", to: "c6", hint: "Develop Knight to c6", color: "b" },
+            { from: "b1", to: "c3", hint: "Develop second Knight", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop second Knight to f6", color: "b" }
+        ]
+    },
+    {
+        id: "OP-028",
+        title: "Scotch Game",
+        description: "White immediately opens the center with d4. A direct approach that avoids the Ruy Lopez complexities.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "e7", to: "e5", hint: "Mirror the center", color: "b" },
+            { from: "g1", to: "f3", hint: "Develop Knight to f3", color: "w" },
+            { from: "b8", to: "c6", hint: "Develop Knight to c6", color: "b" },
+            { from: "d2", to: "d4", hint: "Scotch – open center d4", color: "w" }
+        ]
+    },
+    {
+        id: "OP-029",
+        title: "Ponziani Opening",
+        description: "One of the oldest openings. White plays c3 early to support an eventual d4 thrust in the center.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "e7", to: "e5", hint: "Mirror the center", color: "b" },
+            { from: "g1", to: "f3", hint: "Develop Knight to f3", color: "w" },
+            { from: "b8", to: "c6", hint: "Develop Knight to c6", color: "b" },
+            { from: "c2", to: "c3", hint: "Ponziani signature c3", color: "w" }
+        ]
+    },
+    {
+        id: "OP-030",
+        title: "Budapest Gambit",
+        description: "Black sacrifices a pawn immediately after 1.d4 Nf6 2.c4 to gain rapid piece activity and counterplay.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Advance Queen Pawn", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "c2", to: "c4", hint: "Develop c4 pawn", color: "w" },
+            { from: "e7", to: "e5", hint: "Budapest Gambit – offer e5 pawn", color: "b" }
+        ]
+    },
+    {
+        id: "OP-031",
+        title: "Torre Attack",
+        description: "White deploys Nf3 and Bg5, creating a solid system that can be played against many Black setups.",
+        moves: [
+            { from: "d2", to: "d4", hint: "Advance Queen Pawn", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "g1", to: "f3", hint: "Develop Knight to f3", color: "w" },
+            { from: "d7", to: "d5", hint: "Control the center", color: "b" },
+            { from: "c1", to: "g5", hint: "Torre – Bishop to g5", color: "w" }
+        ]
+    },
+    {
+        id: "OP-032",
+        title: "Bird's Opening",
+        description: "A flank opening where White immediately challenges Black's center with f4, aiming for control of the e5 square.",
+        moves: [
+            { from: "f2", to: "f4", hint: "Bird's signature f4", color: "w" },
+            { from: "d7", to: "d5", hint: "Occupy the center with d5", color: "b" }
+        ]
+    },
+    {
+        id: "OP-033",
+        title: "Evans Gambit",
+        description: "White sacrifices the b4 pawn to gain rapid development and seize an imposing pawn center in the Italian Game.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "e7", to: "e5", hint: "Mirror the center", color: "b" },
+            { from: "g1", to: "f3", hint: "Develop Knight to f3", color: "w" },
+            { from: "b8", to: "c6", hint: "Develop Knight to c6", color: "b" },
+            { from: "f1", to: "c4", hint: "Italian Bishop to c4", color: "w" },
+            { from: "f8", to: "c5", hint: "Develop Bishop to c5", color: "b" },
+            { from: "b2", to: "b4", hint: "Evans Gambit – offer b4 pawn", color: "w" }
+        ]
+    },
+    {
+        id: "OP-034",
+        title: "Sicilian Najdorf",
+        description: "One of the sharpest continuations of the Sicilian. Black plays a6 to secure the b5 square and prepare counterplay.",
+        moves: [
+            { from: "e2", to: "e4", hint: "Control the center", color: "w" },
+            { from: "c7", to: "c5", hint: "Sicilian – fight the center", color: "b" },
+            { from: "g1", to: "f3", hint: "Develop Knight to f3", color: "w" },
+            { from: "d7", to: "d6", hint: "Support center with d6", color: "b" },
+            { from: "d2", to: "d4", hint: "Open the center with d4", color: "w" },
+            { from: "c5", to: "d4", hint: "Exchange on d4", color: "b" },
+            { from: "f3", to: "d4", hint: "Recapture Knight to d4", color: "w" },
+            { from: "g8", to: "f6", hint: "Develop Knight to f6", color: "b" },
+            { from: "b1", to: "c3", hint: "Develop Knight to c3", color: "w" },
+            { from: "a7", to: "a6", hint: "Najdorf signature a6", color: "b" }
+        ]
     }
 ];
 
@@ -2180,6 +2945,8 @@ function renderOpeningBoard() {
     const boardEl = document.getElementById('opening-board');
     if (!boardEl) return;
     boardEl.innerHTML = '';
+    
+    updateOuterBoardCoordinates('opening-board', false);
 
     const board = openingGame.board();
     const columns = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
@@ -2207,12 +2974,7 @@ function renderOpeningBoard() {
                 }
             }
 
-            if (r === 0) {
-                cell.innerHTML += `<span class="absolute bottom-0.5 right-1 text-[9px] font-bold opacity-30">${columns[c]}</span>`;
-            }
-            if (c === 0) {
-                cell.innerHTML += `<span class="absolute top-0.5 left-1 text-[9px] font-bold opacity-30">${r + 1}</span>`;
-            }
+
 
             cell.onclick = () => handleOpeningSquareClick(squareName);
             boardEl.appendChild(cell);
@@ -2223,6 +2985,42 @@ function renderOpeningBoard() {
 let selectedOpeningSquare = null;
 
 function handleOpeningSquareClick(square) {
+    if (isCustomRepertoireMode) {
+        const piece = openingGame.get(square);
+        if (selectedOpeningSquare === null) {
+            if (piece && piece.color === openingGame.turn()) {
+                selectedOpeningSquare = square;
+                const cell = document.querySelector(`#opening-board > div[data-square="${square}"]`);
+                if (cell) cell.className += ' ring-4 ring-secondary/70 ring-inset';
+            }
+        } else {
+            try {
+                const move = openingGame.move({
+                    from: selectedOpeningSquare,
+                    to: square,
+                    promotion: 'q'
+                });
+                if (move) {
+                    playMoveSoundForMove(move, openingGame);
+                    customRepertoireMoves.push({
+                        from: selectedOpeningSquare,
+                        to: square,
+                        hint: `${move.san}`,
+                        color: move.color
+                    });
+                    openingStepIndex++;
+                    document.getElementById('opening-step-badge').innerText = `${customRepertoireMoves.length} Moves`;
+                    document.getElementById('opening-hint-txt').innerText = `Recorded: ${move.san}`;
+                }
+            } catch (e) {
+                showNotification("Invalid chess move!", "warning");
+            }
+            selectedOpeningSquare = null;
+            renderOpeningBoard();
+        }
+        return;
+    }
+
     const opening = OPENINGS.find(o => o.id === activeOpeningId);
     if (!opening) return;
     if (openingStepIndex >= opening.moves.length) return;
@@ -2236,23 +3034,33 @@ function handleOpeningSquareClick(square) {
             const cell = document.querySelector(`#opening-board > div[data-square="${square}"]`);
             if (cell) cell.className += ' ring-4 ring-secondary/70 ring-inset';
         } else {
-            showNotification(`Wrong piece selection! Follow the opening coordinates.`, "warning");
+            if (isMemoryTrainingMode) {
+                showNotification("Incorrect move! Try again.", "warning");
+                playMoveSound('lowtime');
+            } else {
+                showNotification(`Wrong piece selection! Follow the opening coordinates.`, "warning");
+            }
         }
     } else {
         if (square === currentMove.to) {
-            openingGame.move({
+            const move = openingGame.move({
                 from: selectedOpeningSquare,
                 to: square,
                 promotion: 'q'
             });
-            playMoveSound();
+            playMoveSoundForMove(move, openingGame);
             selectedOpeningSquare = null;
             openingStepIndex++;
             
             renderOpeningBoard();
             updateOpeningGuideStep();
         } else {
-            showNotification("Incorrect coordinate target. Try again!", "error");
+            if (isMemoryTrainingMode) {
+                showNotification("Incorrect coordinate target! Try again.", "error");
+                playMoveSound('lowtime');
+            } else {
+                showNotification("Incorrect coordinate target. Try again!", "error");
+            }
             selectedOpeningSquare = null;
             renderOpeningBoard();
             updateOpeningGuideStep();
@@ -2272,22 +3080,32 @@ function updateOpeningGuideStep() {
         badge.className = 'px-3 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full font-bold text-xs';
         hintBox.innerText = 'Theory Mastered! Opening sequence finished.';
         showNotification("Opening Sequence Mastered! Good job.", "success");
+        if (isMemoryTrainingMode) {
+            toggleOpeningMemoryTraining();
+        }
     } else {
         badge.innerText = `Step ${openingStepIndex + 1} / ${opening.moves.length}`;
         badge.className = 'px-3 py-1 bg-secondary/15 text-secondary border border-secondary/30 rounded-full font-bold text-xs';
         
         const currentMove = opening.moves[openingStepIndex];
-        hintBox.innerText = `Move: ${currentMove.from} to ${currentMove.to} (${currentMove.hint})`;
         
-        const cells = document.querySelectorAll('#opening-board > div');
-        cells.forEach(c => {
-            if (c.dataset.square === currentMove.from) {
-                c.className += ' ring-2 ring-primary/45 ring-inset bg-primary/10';
-            }
-            if (c.dataset.square === currentMove.to) {
-                c.className += ' ring-2 ring-secondary/45 ring-inset bg-secondary/10';
-            }
-        });
+        if (isMemoryTrainingMode) {
+            hintBox.innerText = 'Memory Test Active! Execute the next move...';
+        } else {
+            hintBox.innerText = `Move: ${currentMove.from} to ${currentMove.to} (${currentMove.hint})`;
+        }
+        
+        if (!isMemoryTrainingMode) {
+            const cells = document.querySelectorAll('#opening-board > div');
+            cells.forEach(c => {
+                if (c.dataset.square === currentMove.from) {
+                    c.className += ' ring-2 ring-primary/45 ring-inset bg-primary/10';
+                }
+                if (c.dataset.square === currentMove.to) {
+                    c.className += ' ring-2 ring-secondary/45 ring-inset bg-secondary/10';
+                }
+            });
+        }
     }
 }
 
@@ -2310,6 +3128,7 @@ function renderOpeningsSelector() {
                 : 'bg-background/40 border-outline-variant/20 hover:border-secondary/50 text-on-surface-variant'
         }`;
         card.onclick = () => {
+            if (isCustomRepertoireMode) cancelCustomRepertoireMode();
             activeOpeningId = o.id;
             initOpeningsExplorer();
         };
@@ -2322,9 +3141,442 @@ function renderOpeningsSelector() {
                     <span class="text-[9px] block opacity-80">${o.moves.length} steps sequence</span>
                 </div>
             </div>
-            <span class="material-symbols-outlined text-lg opacity-60">menu_book</span>
+            <span class="material-symbols-outlined text-lg opacity-60 flex-shrink-0">menu_book</span>
         `;
         container.appendChild(card);
     });
 }
+
+// ==========================================
+// PGN & FEN IMPORT/EXPORT SYSTEM
+// ==========================================
+let activeModalFormat = 'FEN';
+let activeModalMode = 'import';
+
+function openImportModal() {
+    activeModalMode = 'import';
+    activeModalFormat = 'FEN';
+    document.getElementById('pgn-fen-modal-title').innerText = 'Import FEN / PGN';
+    document.getElementById('btn-modal-action').innerText = 'Load Position';
+    document.getElementById('btn-modal-action').classList.remove('hidden');
+    document.getElementById('btn-modal-copy').classList.add('hidden');
+    document.getElementById('pgn-fen-textarea').value = '';
+    document.getElementById('pgn-fen-textarea').removeAttribute('readonly');
+    document.getElementById('pgn-fen-modal').classList.remove('hidden');
+    selectModalFormat('FEN');
+}
+
+function exportCurrentPosition() {
+    activeModalMode = 'export';
+    document.getElementById('pgn-fen-modal-title').innerText = 'Export FEN / PGN';
+    document.getElementById('btn-modal-action').classList.add('hidden');
+    document.getElementById('btn-modal-copy').classList.remove('hidden');
+    document.getElementById('pgn-fen-textarea').setAttribute('readonly', 'true');
+    document.getElementById('pgn-fen-modal').classList.remove('hidden');
+    selectModalFormat(activeModalFormat || 'FEN');
+}
+
+function closeImportExportModal() {
+    document.getElementById('pgn-fen-modal').classList.add('hidden');
+}
+
+function selectModalFormat(format) {
+    activeModalFormat = format;
+    const btnFen = document.getElementById('btn-modal-format-fen');
+    const btnPgn = document.getElementById('btn-modal-format-pgn');
+    const inputLabel = document.getElementById('pgn-fen-input-label');
+    const textarea = document.getElementById('pgn-fen-textarea');
+
+    if (format === 'FEN') {
+        btnFen.className = 'flex-1 py-2 bg-secondary text-on-secondary rounded-xl text-xs font-semibold transition-all';
+        btnPgn.className = 'flex-1 py-2 bg-surface-variant border border-outline-variant text-on-surface rounded-xl text-xs font-semibold hover:bg-surface-bright transition-all';
+        inputLabel.innerText = 'FEN String';
+        textarea.placeholder = 'e.g. rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+        
+        if (activeModalMode === 'export') {
+            textarea.value = chessGame.fen();
+        }
+    } else {
+        btnFen.className = 'flex-1 py-2 bg-surface-variant border border-outline-variant text-on-surface rounded-xl text-xs font-semibold hover:bg-surface-bright transition-all';
+        btnPgn.className = 'flex-1 py-2 bg-secondary text-on-secondary rounded-xl text-xs font-semibold transition-all';
+        inputLabel.innerText = 'PGN String';
+        textarea.placeholder = 'e.g. 1. e4 e5 2. Nf3 Nc6';
+        
+        if (activeModalMode === 'export') {
+            textarea.value = chessGame.pgn();
+        }
+    }
+}
+
+function applyModalImportExport() {
+    const val = document.getElementById('pgn-fen-textarea').value.trim();
+    if (!val) return;
+
+    if (activeModalFormat === 'FEN') {
+        const validate = chessGame.validate_fen(val);
+        if (validate.valid) {
+            chessGame.load(val);
+            gameHistoryMoves = [];
+            if (gameMode === '3D') {
+                updateBoard3D();
+            } else {
+                renderBoard2D();
+            }
+            closeImportExportModal();
+            showNotification("FEN Position loaded successfully!", "success");
+        } else {
+            showNotification(`Invalid FEN position: ${validate.error}`, "error");
+        }
+    } else {
+        // PGN
+        chessGame.reset();
+        const success = chessGame.load_pgn(val);
+        if (success) {
+            gameHistoryMoves = [];
+            const history = chessGame.history({ verbose: true });
+            
+            const temp = new Chess();
+            history.forEach(m => {
+                temp.move(m);
+                gameHistoryMoves.push({
+                    fen: temp.fen(),
+                    move: m,
+                    eval: evaluateBoard(temp.board()) / 10
+                });
+            });
+
+            chessGame = temp;
+            document.getElementById('arena-mode-select').value = 'review';
+            changeArenaMode('review');
+
+            closeImportExportModal();
+            showNotification("PGN Moves loaded successfully. Switched to review mode!", "success");
+        } else {
+            showNotification("Invalid PGN format or moves!", "error");
+        }
+    }
+}
+
+function copyModalContent() {
+    const textarea = document.getElementById('pgn-fen-textarea');
+    textarea.select();
+    navigator.clipboard.writeText(textarea.value);
+    showNotification("Content copied to clipboard!", "success");
+}
+
+// ==========================================
+// OPENINGS TRAINER & REPERTOIRE BUILDER
+// ==========================================
+let isMemoryTrainingMode = false;
+let isCustomRepertoireMode = false;
+let customRepertoireMoves = [];
+
+function toggleOpeningMemoryTraining() {
+    isMemoryTrainingMode = !isMemoryTrainingMode;
+    const btn = document.getElementById('btn-train-memory');
+    const badge = document.getElementById('opening-step-badge');
+    const hintBox = document.getElementById('opening-hint-txt');
+
+    if (isMemoryTrainingMode) {
+        btn.innerHTML = `<span class="material-symbols-outlined text-sm font-semibold">check_circle</span> Explorer Mode`;
+        btn.className = 'w-full py-2.5 bg-emerald-500 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 hover:scale-[1.02] transition-all duration-200';
+        badge.innerText = 'Memory Test Active';
+        badge.className = 'px-3 py-1 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full font-bold text-xs';
+        hintBox.innerText = 'Hints hidden! Make the opening moves from memory.';
+        initOpeningsExplorer();
+        showNotification("Memory test started! Play the moves without hints.", "info");
+    } else {
+        btn.innerHTML = `<span class="material-symbols-outlined text-sm font-semibold">psychology</span> Train Repertoire Memory`;
+        btn.className = 'w-full py-2.5 bg-secondary text-on-secondary font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 hover:scale-[1.02] transition-all duration-200 shadow-md shadow-secondary/15';
+        initOpeningsExplorer();
+        showNotification("Explorer mode restored.", "info");
+    }
+}
+
+function startCustomRepertoireMode() {
+    isCustomRepertoireMode = true;
+    customRepertoireMoves = [];
+    
+    openingGame = new Chess();
+    openingStepIndex = 0;
+    
+    document.getElementById('custom-repertoire-form').classList.remove('hidden');
+    document.getElementById('opening-title').innerText = 'Creating Custom Repertoire';
+    document.getElementById('opening-description').innerText = 'Play moves on the board to define your repertoire lines. White and Black moves will be recorded.';
+    document.getElementById('opening-step-badge').innerText = '0 Moves';
+    document.getElementById('opening-hint-txt').innerText = 'Play the starting move on the board.';
+    
+    renderOpeningBoard();
+}
+
+function cancelCustomRepertoireMode() {
+    isCustomRepertoireMode = false;
+    document.getElementById('custom-repertoire-form').classList.add('hidden');
+    initOpeningsExplorer();
+}
+
+function saveCustomRepertoire() {
+    const name = document.getElementById('custom-repertoire-name').value.trim();
+    const desc = document.getElementById('custom-repertoire-desc').value.trim() || 'Custom repertoire opening sequence.';
+    
+    if (!name) {
+        showNotification("Please enter a name for your repertoire!", "error");
+        return;
+    }
+    if (customRepertoireMoves.length === 0) {
+        showNotification("Please play some moves on the board first!", "error");
+        return;
+    }
+
+    const newOpening = {
+        id: `OP-CUST-${Date.now()}`,
+        title: name,
+        description: desc,
+        moves: customRepertoireMoves
+    };
+
+    OPENINGS.push(newOpening);
+    const stored = JSON.parse(localStorage.getItem('mindsquare_custom_repertoires') || '[]');
+    stored.push(newOpening);
+    localStorage.setItem('mindsquare_custom_repertoires', JSON.stringify(stored));
+
+    isCustomRepertoireMode = false;
+    document.getElementById('custom-repertoire-form').classList.add('hidden');
+    
+    activeOpeningId = newOpening.id;
+    initOpeningsExplorer();
+    showNotification("Custom repertoire saved successfully!", "success");
+}
+
+(function loadCustomRepertoires() {
+    try {
+        const stored = JSON.parse(localStorage.getItem('mindsquare_custom_repertoires') || '[]');
+        stored.forEach(o => {
+            if (!OPENINGS.find(item => item.id === o.id)) {
+                OPENINGS.push(o);
+            }
+        });
+    } catch (e) {}
+})();
+
+// ================================================================
+// ENDGAME TRAINER
+// ================================================================
+let endgameGame = null;
+let activeEndgameId = 'kp-v-k';
+let endgameSelectedSquare = null;
+
+const ENDGAME_SCENARIOS = {
+    'kp-v-k': {
+        title: 'King & Pawn vs King',
+        description: 'White to move and promote. Learn to guide your pawn using the concept of key squares and opposition.',
+        fen: '8/8/3k4/8/3K1P2/8/8/8 w - - 0 1',
+        instructions: 'Push your pawn forward, but remember to lead with your King first to secure the key squares.'
+    },
+    'kq-v-k': {
+        title: 'King & Queen vs King Mate',
+        description: 'Deliver checkmate with King and Queen in under 15 moves. Drive the enemy King to the edge.',
+        fen: '8/8/8/3k4/8/8/3Q4/3K4 w - - 0 1',
+        instructions: 'Coordinate your King and Queen. Remember not to stalemate the black King!'
+    },
+    'kr-v-k': {
+        title: 'King & Rook vs King Mate',
+        description: 'Deliver checkmate with King and Rook. Learn the box method to trap the black King.',
+        fen: '8/8/8/3k4/8/8/3R4/3K4 w - - 0 1',
+        instructions: 'Shrink the box around the Black King. White King must support the Rook to mate.'
+    },
+    'opposition': {
+        title: 'Opposition Practice',
+        description: 'White King must take opposition to push the pawn to promotion.',
+        fen: '8/8/8/4k3/4P3/8/4K3/8 w - - 0 1',
+        instructions: 'Step in front of the enemy King when they step in front of yours to take opposition.'
+    }
+};
+
+function initEndgameTrainer() {
+    const scenario = ENDGAME_SCENARIOS[activeEndgameId];
+    if (!scenario) return;
+
+    endgameGame = new Chess(scenario.fen);
+    endgameSelectedSquare = null;
+
+    const titleEl = document.getElementById('endgame-title');
+    const instEl = document.getElementById('endgame-instructions');
+    if (titleEl) titleEl.innerText = scenario.title;
+    if (instEl) instEl.innerText = scenario.instructions;
+    
+    const badge = document.getElementById('endgame-status-badge');
+    if (badge) {
+        badge.innerText = 'Unsolved';
+        badge.className = 'px-3 py-1 bg-amber-500/20 text-secondary border border-secondary/30 rounded-full font-bold text-xs';
+    }
+
+    const feedback = document.getElementById('endgame-feedback');
+    if (feedback) feedback.classList.add('hidden');
+
+    renderEndgameBoard();
+}
+
+function resetEndgameTrainer() {
+    initEndgameTrainer();
+    showNotification('Board reset!', 'info');
+}
+
+function loadEndgameScenario(val) {
+    activeEndgameId = val;
+    initEndgameTrainer();
+}
+
+function renderEndgameBoard() {
+    const boardEl = document.getElementById('endgame-board');
+    if (!boardEl) return;
+    boardEl.innerHTML = '';
+    
+    updateOuterBoardCoordinates('endgame-board', false);
+
+    const board = endgameGame.board();
+    const columns = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+
+    for (let r = 7; r >= 0; r--) {
+        for (let c = 0; c < 8; c++) {
+            const squareName = columns[c] + (r + 1);
+            const piece = board[7 - r][c];
+            const cell = document.createElement('div');
+            cell.dataset.square = squareName;
+            
+            const isDark = (r + c) % 2 === 0;
+            cell.className = `relative aspect-square flex items-center justify-center cursor-pointer transition-all duration-200 select-none `;
+            
+            const skinColors = BOARD_SKINS[activeBoardSkin] || BOARD_SKINS['green'];
+            cell.style.backgroundColor = isDark ? skinColors.dark : skinColors.light;
+            cell.style.color = isDark ? skinColors.darkText : skinColors.lightText;
+            
+            if (piece) {
+                const pieceKey = piece.color + piece.type;
+                let pieceSvg = SVG_PIECES[pieceKey];
+                if (pieceSvg) {
+                    pieceSvg = pieceSvg.replace('<svg', '<svg class="w-full h-full"');
+                    cell.innerHTML = `<div class="w-4/5 h-4/5 flex items-center justify-center transform active:scale-95 transition-transform z-10">${pieceSvg}</div>`;
+                }
+            }
+
+            // Highlights
+            if (endgameSelectedSquare === squareName) {
+                cell.classList.add('ring-4', 'ring-secondary', 'ring-inset');
+            }
+
+            cell.onclick = () => handleEndgameSquareClick(squareName);
+            boardEl.appendChild(cell);
+        }
+    }
+}
+
+function handleEndgameSquareClick(square) {
+    if (endgameGame.game_over()) return;
+    if (endgameGame.turn() !== 'w') return; // Only allow player to move White pieces
+
+    const piece = endgameGame.get(square);
+
+    if (endgameSelectedSquare === null) {
+        if (piece && piece.color === 'w') {
+            endgameSelectedSquare = square;
+            renderEndgameBoard();
+        }
+    } else {
+        if (square === endgameSelectedSquare) {
+            endgameSelectedSquare = null;
+            renderEndgameBoard();
+            return;
+        }
+
+        const move = {
+            from: endgameSelectedSquare,
+            to: square,
+            promotion: 'q' // Auto-promote to Queen for simplicity
+        };
+
+        try {
+            const result = endgameGame.move(move);
+            if (result) {
+                playMoveSoundForMove(result, endgameGame);
+                endgameSelectedSquare = null;
+                renderEndgameBoard();
+
+                if (endgameGame.game_over()) {
+                    checkEndgameStatus();
+                } else {
+                    // Computer replies
+                    setTimeout(makeEndgameAIMove, 700);
+                }
+            } else {
+                endgameSelectedSquare = null;
+                renderEndgameBoard();
+            }
+        } catch (e) {
+            endgameSelectedSquare = null;
+            renderEndgameBoard();
+        }
+    }
+}
+
+function makeEndgameAIMove() {
+    if (endgameGame.game_over()) return;
+
+    // Use alpha-beta minimax from parent page by swapping references temporarily
+    const tempGame = window.chessGame;
+    window.chessGame = endgameGame;
+    
+    // Calculate AI reply (depth 3 is fast and challenging for endgames)
+    const bestMove = selectBestMove(3);
+    
+    window.chessGame = tempGame; // restore original
+
+    if (bestMove) {
+        endgameGame.move(bestMove);
+        playMoveSoundForMove(bestMove, endgameGame);
+        renderEndgameBoard();
+        checkEndgameStatus();
+    }
+}
+
+function checkEndgameStatus() {
+    const badge = document.getElementById('endgame-status-badge');
+    const feedback = document.getElementById('endgame-feedback');
+    if (!badge || !feedback) return;
+
+    feedback.classList.remove('hidden');
+
+    if (endgameGame.in_checkmate()) {
+        if (endgameGame.turn() === 'b') {
+            // White won! (It's Black's turn and Black is mated)
+            badge.innerText = 'Solved ✅';
+            badge.className = 'px-3 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full font-bold text-xs';
+            feedback.innerText = 'Excellent job! You successfully delivered checkmate. +15 ELO rewarded!';
+            feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+            
+            // Add points ELO to user
+            const user = getCurrentUser();
+            if (user) {
+                const userPoints = (user.points || 0) + 15;
+                if (typeof updateStudentStats === 'function') {
+                    updateStudentStats({ points: userPoints });
+                } else if (typeof updateStudentProgression === 'function') {
+                    updateStudentProgression(user.id, 'points', 15);
+                }
+            }
+            launchConfetti();
+        } else {
+            badge.innerText = 'Failed ❌';
+            badge.className = 'px-3 py-1 bg-red-500/20 text-red-400 border border-red-500/30 rounded-full font-bold text-xs';
+            feedback.innerText = 'Oh no! The computer delivered checkmate. Try again!';
+            feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20';
+        }
+    } else if (endgameGame.in_draw() || endgameGame.in_stalemate() || endgameGame.in_threefold_repetition()) {
+        badge.innerText = 'Draw 🤝';
+        badge.className = 'px-3 py-1 bg-slate-500/20 text-slate-400 border border-slate-500/30 rounded-full font-bold text-xs';
+        feedback.innerText = 'The game ended in a draw or stalemate. Review key opposition rules!';
+        feedback.className = 'p-3 rounded-xl text-xs font-semibold bg-slate-500/10 text-slate-400 border border-slate-500/20';
+    }
+}
+
 

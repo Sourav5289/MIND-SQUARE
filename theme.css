@@ -200,84 +200,7 @@
             transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
 
-        /* ElectricBorder CSS */
-        .electric-border {
-            position: relative;
-            border-radius: 16px;
-            overflow: visible !important;
-            isolation: isolate;
-        }
 
-        #dash-user-avatar-wrapper.electric-border {
-            border-color: transparent !important;
-        }
-
-        #dash-user-avatar-wrapper:not(.electric-border) .eb-canvas-container,
-        #dash-user-avatar-wrapper:not(.electric-border) .eb-layers {
-            display: none !important;
-        }
-
-        .eb-canvas-container {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            pointer-events: none;
-            z-index: 2;
-        }
-
-        .eb-canvas {
-            display: block;
-        }
-
-        .eb-content {
-            position: relative;
-            border-radius: inherit;
-            z-index: 3;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            text-align: center;
-        }
-
-        .eb-layers {
-            position: absolute;
-            inset: 0;
-            border-radius: inherit;
-            pointer-events: none;
-            z-index: 0;
-        }
-
-        .eb-glow-1,
-        .eb-glow-2,
-        .eb-background-glow {
-            position: absolute;
-            inset: 0;
-            border-radius: inherit;
-            pointer-events: none;
-            box-sizing: border-box;
-        }
-
-        .eb-glow-1 {
-            border: 2px solid var(--electric-border-glow-1, rgba(125, 249, 255, 0.6));
-            filter: blur(1px);
-        }
-
-        .eb-glow-2 {
-            border: 2px solid var(--electric-border-glow-2, #7df9ff);
-            filter: blur(4px);
-        }
-
-        .eb-background-glow {
-            z-index: -1;
-            transform: scale(1.1);
-            filter: blur(32px);
-            opacity: 0.3;
-            background: linear-gradient(-30deg, var(--electric-border-glow-2, #7df9ff), transparent, var(--electric-border-color, #7df9ff));
-        }
 
         /* ── Rose Three Loader Overlay ──────────────────────────────── */
         #rose-loader-overlay {
@@ -323,4 +246,20 @@
         @keyframes rose-label-pulse {
             0%, 100% { opacity: 0.55; }
             50%       { opacity: 1; }
+        }
+
+        /* ── Opening Dictionary scrollable list ── */
+        #openings-list-container::-webkit-scrollbar {
+            width: 5px;
+        }
+        #openings-list-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        #openings-list-container::-webkit-scrollbar-thumb {
+            background: var(--secondary, #b8860b);
+            border-radius: 99px;
+            opacity: 0.6;
+        }
+        #openings-list-container::-webkit-scrollbar-thumb:hover {
+            background: var(--primary, #3f5f90);
         }

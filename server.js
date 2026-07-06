@@ -4,17 +4,48 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { Pool } = require('pg');
+const helmet = require('helmet');
 require('dotenv').config();
 
 const app = express();
 // OWASP A05: Disable X-Powered-By to prevent technology fingerprinting
 app.disable('x-powered-by');
+
+// Middleware to generate a cryptographically secure random nonce per-request for Content Security Policy (CSP)
+app.use((req, res, next) => {
+    // Generate 16 bytes base64 nonce
+    const nonce = crypto.randomBytes(16).toString('base64');
+    res.locals.nonce = nonce;
+
+    // Execute helmet dynamically with the generated nonce injected into scriptSrc and scriptSrcElem
+    helmet({
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'"],
+                // scriptSrc acts as fallback for older browsers
+                scriptSrc: ["'self'", `'nonce-${nonce}'`, "https://accounts.google.com"],
+                // scriptSrcElem blocks inline script injections (<script>...) in modern browsers
+                scriptSrcElem: ["'self'", `'nonce-${nonce}'`, "https://accounts.google.com"],
+                // scriptSrcAttr blocks inline event attributes (onclick...) for absolute XSS security
+                scriptSrcAttr: ["'self'"],
+                styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://fonts.googleapis.com/css2"],
+                fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+                imgSrc: ["'self'", "data:", "https://api.dicebear.com", "https://*.googleusercontent.com", "https://accounts.google.com"],
+                connectSrc: ["'self'", "https://accounts.google.com", "https://play.google.com/log"],
+                frameSrc: ["'self'", "https://accounts.google.com"]
+            }
+        },
+        crossOriginEmbedderPolicy: false
+    })(req, res, next);
+});
+
 // Remove the 'Server' header that leaks Node.js/Express version information
 app.use((req, res, next) => { res.removeHeader('Server'); next(); });
 const PORT = process.env.PORT || 3000;
 
-// Trust proxies (Harden IP resolving against header spoofing behind load balancers/proxies)
-app.set('trust proxy', true);
+// Trust exactly 1 proxy hop (e.g. Nginx/load balancer in front of Node).
+// Using 'true' would trust ALL X-Forwarded-For values, allowing IP spoofing to bypass rate limits.
+app.set('trust proxy', 1);
 
 // Retrieve signed session verification key. In production, REQUIRE the env var (fail-closed).
 // In development, fall back to a per-process random key (sessions invalidate on restart).
@@ -30,17 +61,61 @@ const JWT_SECRET = (() => {
     return crypto.randomBytes(32).toString('hex');
 })();
 
+// SECURITY: AES-256-CBC encryption/decryption helpers for Zoom meeting URLs at rest
+function encryptText(text) {
+    if (!text) return '';
+    try {
+        const key = crypto.createHash('sha256').update(JWT_SECRET).digest(); // 32 bytes key
+        const iv = crypto.randomBytes(16);
+        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+        let encrypted = cipher.update(text, 'utf8', 'hex');
+        encrypted += cipher.final('hex');
+        return iv.toString('hex') + ':' + encrypted;
+    } catch (e) {
+        console.error('Encryption failed:', e);
+        return text;
+    }
+}
+
+function decryptText(encryptedText) {
+    if (!encryptedText) return '';
+    try {
+        const parts = encryptedText.split(':');
+        if (parts.length !== 2) return encryptedText; // Fallback if plain text
+        const iv = Buffer.from(parts[0], 'hex');
+        const encrypted = parts[1];
+        const key = crypto.createHash('sha256').update(JWT_SECRET).digest();
+        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+        let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch (e) {
+        return encryptedText; // Fallback to plain text if decryption fails
+    }
+}
+
 // Retrieve Zoom Meeting URL from env. Fail-closed: empty string if not set (no fake placeholder).
 const ZOOM_MEETING_URL = process.env.ZOOM_MEETING_URL || "";
 
 // Google OAuth 2.0 Client ID for Sign in with Google (configured in Google Cloud Console)
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
-function buildContentSecurityPolicy() {
+// Build the Content Security Policy header string.
+// When a per-request nonce is provided, script-src and script-src-elem use the nonce
+// instead of the broad 'unsafe-inline', providing the strongest XSS protection.
+function buildContentSecurityPolicy(nonce) {
+    const scriptSrcParts = ["'self'", "https://accounts.google.com", "https://accounts.google.com/gsi/client"];
+    if (nonce) {
+        scriptSrcParts.push(`'nonce-${nonce}'`);
+    } else {
+        // Fallback for API-only responses that skip HTML injection
+        scriptSrcParts.push("'unsafe-inline'");
+    }
     return [
         "default-src 'self'",
-        "script-src 'self' https://accounts.google.com https://accounts.google.com/gsi/client",
-        "script-src-attr 'unsafe-inline'",
+        `script-src ${scriptSrcParts.join(' ')}`,
+        `script-src-elem ${scriptSrcParts.join(' ')}`,
+        "script-src-attr 'self'",
         "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style",
         "style-src-elem 'self' 'unsafe-inline' https://accounts.google.com/gsi/style",
         "style-src-attr 'unsafe-inline'",
@@ -49,7 +124,7 @@ function buildContentSecurityPolicy() {
         "connect-src 'self' https://accounts.google.com https://accounts.google.com/gsi/",
         "frame-src 'self' https://accounts.google.com https://accounts.google.com/gsi/",
         "frame-ancestors 'none'",
-        "form-action 'self'",
+        "form-action 'self' https://wa.me",
         "base-uri 'self'",
         "object-src 'none'"
     ].join('; ');
@@ -64,25 +139,28 @@ function applySecurityHeaders(req, res) {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    res.setHeader('Content-Security-Policy', buildContentSecurityPolicy());
+    // Pass the per-request nonce so the CSP header matches the injected script nonces
+    res.setHeader('Content-Security-Policy', buildContentSecurityPolicy(res.locals.nonce));
     res.removeHeader('Server');
     res.removeHeader('X-Powered-By');
 }
-
 // Rate limiting state storage (IP/User-based maps)
 const rateLimitStores = {
     general: new Map(),
-    auth: new Map()
+    auth: new Map(),
+    stats: new Map()
 };
 
 // Periodic pruning of expired rate-limit records (every 1 minute)
 setInterval(() => {
     const now = Date.now();
-    for (const storeType of ['general', 'auth']) {
+    for (const storeType of ['general', 'auth', 'stats']) {
         const store = rateLimitStores[storeType];
-        for (const [key, data] of store.entries()) {
-            if (now > data.resetTime) {
-                store.delete(key);
+        if (store) {
+            for (const [key, data] of store.entries()) {
+                if (now > data.resetTime) {
+                    store.delete(key);
+                }
             }
         }
     }
@@ -120,7 +198,7 @@ async function logAuditTrail(client, actorId, action, targetId, details) {
 
 // Helper function to create rate limit middleware (IP + user-based, graceful 429s)
 function rateLimiter({ max, windowMs, storeType = 'general' }) {
-    return (req, res, next) => {
+    return async (req, res, next) => {
         const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
         let key = `ip:${ip}`;
 
@@ -138,31 +216,59 @@ function rateLimiter({ max, windowMs, storeType = 'general' }) {
                 key = `user:${decoded.id}`;
             }
         }
-        // SECURITY: Removed X-Caller-Id composite key (header was untrusted).
 
         const now = Date.now();
-        const store = rateLimitStores[storeType];
+        let count = 0;
+        let resetTime = now + windowMs;
 
-        let clientData = store.get(key);
-        if (!clientData || now > clientData.resetTime) {
-            clientData = {
-                count: 0,
-                resetTime: now + windowMs
-            };
+        if (redisClient && redisClient.isOpen) {
+            try {
+                const redisKey = `mindsquare:rate:${storeType}:${key}`;
+                const multi = redisClient.multi();
+                multi.incr(redisKey);
+                multi.ttl(redisKey);
+                const results = await multi.exec();
+                
+                count = results[0];
+                const ttl = results[1];
+
+                if (ttl === -1 || count === 1) {
+                    await redisClient.expire(redisKey, Math.ceil(windowMs / 1000));
+                    resetTime = now + windowMs;
+                } else {
+                    resetTime = now + (ttl * 1000);
+                }
+            } catch (e) {
+                console.error('Redis rate limit increment failed, falling back to memory:', e);
+                count = 0;
+            }
         }
 
-        clientData.count++;
-        store.set(key, clientData);
+        // Memory fallback if Redis is down, not open, or error occurred
+        if (count === 0) {
+            const store = rateLimitStores[storeType];
+            let clientData = store.get(key);
+            if (!clientData || now > clientData.resetTime) {
+                clientData = {
+                    count: 0,
+                    resetTime: now + windowMs
+                };
+            }
+            clientData.count++;
+            store.set(key, clientData);
+            count = clientData.count;
+            resetTime = clientData.resetTime;
+        }
 
         res.setHeader('X-RateLimit-Limit', max);
-        res.setHeader('X-RateLimit-Remaining', Math.max(0, max - clientData.count));
-        res.setHeader('X-RateLimit-Reset', new Date(clientData.resetTime).toISOString());
+        res.setHeader('X-RateLimit-Remaining', Math.max(0, max - count));
+        res.setHeader('X-RateLimit-Reset', new Date(resetTime).toISOString());
 
-        if (clientData.count > max) {
-            logSecurityEvent('WARN', 'RATE_LIMIT_EXCEEDED', req, { storeType, count: clientData.count, max, rateLimitKey: key });
+        if (count > max) {
+            logSecurityEvent('WARN', 'RATE_LIMIT_EXCEEDED', req, { storeType, count, max, rateLimitKey: key });
             return res.status(429).json({
                 error: 'Too many requests. Please try again later.',
-                retryAfter: Math.round((clientData.resetTime - now) / 1000)
+                retryAfter: Math.round((resetTime - now) / 1000)
             });
         }
         next();
@@ -181,6 +287,55 @@ async function dbAuthRateLimiter(req, res, next) {
     const keysToCheck = [`ip:${ip}`];
     if (email && typeof email === 'string') {
         keysToCheck.push(`email:${email.toLowerCase().trim()}`);
+    }
+
+    // Try Redis first to avoid DB transactional locks under auth storm events
+    if (redisClient && redisClient.isOpen) {
+        try {
+            let rateLimitExceeded = false;
+            let worstRemaining = max;
+            let worstResetTime = new Date(Date.now() + windowMs);
+
+            for (const key of keysToCheck) {
+                const redisKey = `mindsquare:auth:${key}`;
+                const multi = redisClient.multi();
+                multi.incr(redisKey);
+                multi.ttl(redisKey);
+                const results = await multi.exec();
+
+                const count = results[0];
+                const ttl = results[1];
+
+                const remaining = Math.max(0, max - count);
+                if (remaining < worstRemaining) {
+                    worstRemaining = remaining;
+                    worstResetTime = ttl > 0 ? new Date(Date.now() + ttl * 1000) : new Date(Date.now() + windowMs);
+                }
+
+                if (ttl === -1 || count === 1) {
+                    await redisClient.expire(redisKey, Math.ceil(windowMs / 1000));
+                }
+
+                if (count > max) {
+                    rateLimitExceeded = true;
+                }
+            }
+
+            res.setHeader('X-RateLimit-Limit', max);
+            res.setHeader('X-RateLimit-Remaining', worstRemaining);
+            res.setHeader('X-RateLimit-Reset', worstResetTime.toISOString());
+
+            if (rateLimitExceeded) {
+                logSecurityEvent('WARN', 'RATE_LIMIT_EXCEEDED', req, { storeType: 'auth_redis', keys: keysToCheck, max });
+                return res.status(429).json({
+                    error: 'Too many authentication attempts. Please try again later.',
+                    retryAfter: Math.round((worstResetTime.getTime() - Date.now()) / 1000)
+                });
+            }
+            return next();
+        } catch (redisErr) {
+            console.error('Redis auth rate limiter failed, falling back to DB/Memory:', redisErr);
+        }
     }
 
     let client;
@@ -408,26 +563,26 @@ function validateBodySchema(schema) {
 
 // Define strict request validation schemas
 const LOGIN_SCHEMA = {
-    email: { type: 'string', required: true, maxLength: 254, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
-    name: { type: 'string', required: true, maxLength: 100 },
-    avatar: { type: 'string', required: false, maxLength: 5000000 }
+    credential: { type: 'string', required: false, maxLength: 5000 },
+    email: { type: 'string', required: false, maxLength: 254, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
+    name: { type: 'string', required: false, maxLength: 100, pattern: /^[a-zA-Z0-9\s.\-_']{1,100}$/ },
+    avatar: { type: 'string', required: false, maxLength: 200000, pattern: /^(https:\/\/|data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);base64,)/ }
 };
 
 const UPDATE_NAME_SCHEMA = {
-    name: { type: 'string', required: true, maxLength: 100 }
+    name: { type: 'string', required: true, maxLength: 100, pattern: /^[a-zA-Z0-9\s.\-_']{1,100}$/ }
 };
 
 const UPDATE_AVATAR_SCHEMA = {
-    avatar: { type: 'string', required: true, maxLength: 5000000 }
+    // SECURITY: 200 KB cap (base64 ~133 KB image). Prevents large payload abuse.
+    // Only accept HTTPS URLs or data:image/ URIs — blocks javascript: and other dangerous schemes.
+    avatar: { type: 'string', required: true, maxLength: 200000, pattern: /^(https:\/\/|data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);base64,)/ }
 };
 
 const UPDATE_DOB_SCHEMA = {
     dob: { type: 'string', required: true, maxLength: 20, pattern: /^\d{4}-\d{2}-\d{2}$/ }
 };
 
-const ATTENDANCE_LOG_SCHEMA = {
-    date: { type: 'string', required: true, maxLength: 20, pattern: /^\d{4}-\d{2}-\d{2}$/ }
-};
 
 const UPDATE_STATS_SCHEMA = {
     points: { type: 'number', required: true, min: 0, max: 1000000 },
@@ -437,44 +592,18 @@ const UPDATE_STATS_SCHEMA = {
     solvedPuzzles: { type: 'array', required: true }
 };
 
-const TEACHER_EDIT_POINTS_SCHEMA = {
-    points: { type: 'number', required: true, min: 0, max: 1000000 }
-};
-
-const ADD_BADGE_SCHEMA = {
-    badgeId: { type: 'string', required: true, maxLength: 50 }
-};
-
-const ASSIGN_HOMEWORK_SCHEMA = {
-    studentId: { type: 'string', required: true, maxLength: 50 },
-    puzzleId: { type: 'string', required: true, maxLength: 50 }
-};
-
-const ASSIGN_HOMEWORK_ALL_SCHEMA = {
-    puzzleId: { type: 'string', required: true, maxLength: 50 }
-};
-
-const COACHING_NOTES_SCHEMA = {
-    notes: { type: 'string', required: true, maxLength: 5000 }
-};
-
-const UPDATE_SCHEDULE_SCHEMA = {
-    day: { type: 'string', required: true, maxLength: 20 },
-    time: { type: 'string', required: true, maxLength: 20 },
-    hour: { type: 'number', required: true, min: 0, max: 23 },
-    minute: { type: 'number', required: true, min: 0, max: 59 },
-    level: { type: 'string', required: true, maxLength: 50 },
-    students: { type: 'array', required: true },
-    link: { type: 'string', required: true, maxLength: 2000 }
-};
-
 // Configure secure CORS policies.
 // In production, set ALLOWED_ORIGINS env var (comma-separated). Localhost is dev-only.
 const envOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',').map(o => o.trim()).filter(Boolean);
-const devOrigins = process.env.NODE_ENV === 'production'
-    ? []
-    : ['http://localhost:3000', 'http://localhost:5000', 'http://127.0.0.1:3000', 'http://127.0.0.1:5000'];
+const devOrigins = [
+    'http://localhost:3000',
+    'http://localhost:5000',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5000',
+    `http://localhost:${PORT}`,
+    `http://127.0.0.1:${PORT}`
+];
 const whitelist = [...new Set([...envOrigins, ...devOrigins])];
 const corsOptions = {
     origin: function (origin, callback) {
@@ -755,6 +884,13 @@ function injectSriIntoHtml(html) {
 function serveProcessedHtml(content, res) {
     let processed = content.replace(/<!--[\s\S]*?-->/g, '');
     processed = injectSriIntoHtml(processed);
+
+    // Inject the CSP nonce dynamically to all script tags
+    const nonce = res.locals.nonce;
+    if (nonce) {
+        processed = processed.replace(/<script\b/g, `<script nonce="${nonce}"`);
+    }
+
     res.setHeader('Content-Type', 'text/html');
     res.send(processed);
 }
@@ -874,19 +1010,8 @@ app.use((req, res, next) => {
 // Apply general API rate limiting to all requests
 app.use('/api/', rateLimiter({ max: 150, windowMs: 15 * 60 * 1000, storeType: 'general' }));
 
-// Configured Teacher Emails (10 specific emails)
-const TEACHER_EMAILS = [
-    's41026143@gmail.com',
-    'teacher2@mindsquare.com',
-    'teacher3@mindsquare.com',
-    'teacher4@mindsquare.com',
-    'teacher5@mindsquare.com',
-    'teacher6@mindsquare.com',
-    'teacher7@mindsquare.com',
-    'teacher8@mindsquare.com',
-    'teacher9@mindsquare.com',
-    'teacher10@mindsquare.com'
-];
+const statsRateLimiter = rateLimiter({ max: 30, windowMs: 15 * 60 * 1000, storeType: 'stats' });
+
 
 // PostgreSQL connection pool — sized for typical Express concurrency.
 // max: caps simultaneous DB connections to avoid overwhelming PostgreSQL (default is 10, raised slightly).
@@ -908,13 +1033,32 @@ const pool = new Pool({
     keepAliveInitialDelayMillis: 10000
 });
 
-// ─── In-Memory Cache ────────────────────────────────────────────────────────
-// A lightweight TTL cache so the two most-read endpoints (student list &
-// analytics) don't hit the DB on every request. Each entry expires after its
-// TTL (ms) and is evicted lazily on the next read.
+// ─── Redis Connection & Configuration ──────────────────────────────────────
+const redis = require('redis');
+let redisClient = null;
+
+if (process.env.REDIS_URL) {
+    redisClient = redis.createClient({ url: process.env.REDIS_URL });
+    redisClient.on('error', (err) => console.error('Redis Client Error', err));
+    redisClient.connect().then(() => {
+        console.log('Connected to Redis server.');
+    }).catch(err => {
+        console.error('Failed to connect to Redis, running with memory fallback:', err);
+    });
+}
+
+// ─── Cache layer with Redis / In-Memory support ─────────────────────────────
 const cache = {
     _store: new Map(),
-    get(key) {
+    async get(key) {
+        if (redisClient && redisClient.isOpen) {
+            try {
+                const val = await redisClient.get(key);
+                return val ? JSON.parse(val) : null;
+            } catch (e) {
+                console.error('Redis cache get error:', e);
+            }
+        }
         const entry = this._store.get(key);
         if (!entry) return null;
         if (Date.now() > entry.expiresAt) {
@@ -923,14 +1067,43 @@ const cache = {
         }
         return entry.value;
     },
-    set(key, value, ttlMs) {
+    async set(key, value, ttlMs) {
+        if (redisClient && redisClient.isOpen) {
+            try {
+                await redisClient.set(key, JSON.stringify(value), {
+                    PX: ttlMs
+                });
+                return;
+            } catch (e) {
+                console.error('Redis cache set error:', e);
+            }
+        }
         this._store.set(key, { value, expiresAt: Date.now() + ttlMs });
     },
-    del(key) {
+    async del(key) {
+        if (redisClient && redisClient.isOpen) {
+            try {
+                await redisClient.del(key);
+                return;
+            } catch (e) {
+                console.error('Redis cache del error:', e);
+            }
+        }
         this._store.delete(key);
     },
     // Invalidate a group of keys by prefix (e.g. 'students' clears all student caches)
-    invalidatePrefix(prefix) {
+    async invalidatePrefix(prefix) {
+        if (redisClient && redisClient.isOpen) {
+            try {
+                const keys = await redisClient.keys(`${prefix}*`);
+                if (keys.length > 0) {
+                    await redisClient.del(keys);
+                }
+                return;
+            } catch (e) {
+                console.error('Redis cache invalidatePrefix error:', e);
+            }
+        }
         for (const key of this._store.keys()) {
             if (key.startsWith(prefix)) this._store.delete(key);
         }
@@ -957,8 +1130,8 @@ async function executeQuery(sql, params = []) {
     const res = await pool.query(pgSql, params);
     const verb = sql.trim().slice(0, 6).toUpperCase();
     if (verb === 'INSERT' || verb === 'UPDATE' || verb === 'DELETE') {
-        cache.invalidatePrefix('students');
-        cache.del('analytics:overview');
+        await cache.invalidatePrefix('students');
+        await cache.del('analytics:overview');
     }
     return res.rows;
 }
@@ -971,8 +1144,8 @@ async function executeClientQuery(client, sql, params = []) {
     const res = await client.query(pgSql, params);
     const verb = sql.trim().slice(0, 6).toUpperCase();
     if (verb === 'INSERT' || verb === 'UPDATE' || verb === 'DELETE') {
-        cache.invalidatePrefix('students');
-        cache.del('analytics:overview');
+        await cache.invalidatePrefix('students');
+        await cache.del('analytics:overview');
     }
     return res.rows;
 }
@@ -993,14 +1166,7 @@ async function setupDatabaseSchema() {
             created_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
         )
     `);
-    await executeQuery(`
-        CREATE TABLE IF NOT EXISTS attendance_history (
-            student_id VARCHAR(50),
-            date       VARCHAR(20),
-            PRIMARY KEY (student_id, date),
-            FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
-        )
-    `);
+
     await executeQuery(`
         CREATE TABLE IF NOT EXISTS student_badges (
             student_id VARCHAR(50),
@@ -1013,9 +1179,13 @@ async function setupDatabaseSchema() {
         CREATE TABLE IF NOT EXISTS student_puzzles (
             student_id VARCHAR(50),
             puzzle_id  VARCHAR(100),
+            solved_at  DATE DEFAULT CURRENT_DATE,
             PRIMARY KEY (student_id, puzzle_id),
             FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
         )
+    `);
+    await executeQuery(`
+        ALTER TABLE student_puzzles ADD COLUMN IF NOT EXISTS solved_at DATE DEFAULT CURRENT_DATE
     `);
 
     // 1.5. Ensure columns exist for DOB, birthday rewards, role-based access control, coaching feedback, and decay tracking
@@ -1097,41 +1267,98 @@ async function setupDatabaseSchema() {
         )
     `);
 
-    // Seed Class Schedules if table is empty
-    const scheduleCount = await executeQuery('SELECT COUNT(*) as count FROM class_schedules');
-    if (parseInt(scheduleCount[0]?.count || 0) === 0) {
-        const defaultSchedules = [
-            { id: "SCH-001", day: "Tuesday", time: "7:15 PM", hour: 19, minute: 15, level: "Super Intermediate", students: ["Anay", "Avyukth", "Aarnav Ramesh", "Vishrija", "Ananya", "Neeketchar", "Shourya Vihaan", "Shiv Rishitha"], link: ZOOM_MEETING_URL },
-            { id: "SCH-002", day: "Tuesday", time: "9:00 PM", hour: 21, minute: 0, level: "Basic Beginner", students: ["Agastya (1-2-1) USA"], link: ZOOM_MEETING_URL },
-            { id: "SCH-003", day: "Wednesday", time: "7:15 PM", hour: 19, minute: 15, level: "Advanced", students: ["Suraj R Nair", "Alphonse", "Vihaan Choudhary", "Nived", "Darshan V S", "Nirupam", "Rudransh", "Rohan Krishna"], link: ZOOM_MEETING_URL },
-            { id: "SCH-004", day: "Thursday", time: "5:45 PM", hour: 17, minute: 45, level: "Super Intermediate", students: ["Anay", "Avyukth", "Aarnav Ramesh", "Urjit", "Ananya", "Shourya Vihaan"], link: ZOOM_MEETING_URL },
-            { id: "SCH-005", day: "Thursday", time: "7:45 PM", hour: 19, minute: 45, level: "Intermediate", students: ["Manas", "Ayaansh Jangale", "Taashi", "Advika", "Ananthashayan", "Ruhika", "Krishnav", "Abhiram"], link: ZOOM_MEETING_URL },
-            { id: "SCH-006", day: "Thursday", time: "9:00 PM", hour: 21, minute: 0, level: "Intermediate", students: ["Nitaant (1-2-1) Germany"], link: ZOOM_MEETING_URL },
-            { id: "SCH-007", day: "Friday", time: "5:45 PM", hour: 17, minute: 45, level: "Advanced", students: ["Suraj R Nair", "Alphonse", "Vihaan Choudhary", "Nived", "Darshan V S", "Nirupam", "Rudransh", "Rohan Krishna"], link: ZOOM_MEETING_URL },
-            { id: "SCH-008", day: "Saturday", time: "7:15 AM", hour: 7, minute: 15, level: "Intermediate - TX", students: ["Vedaang", "Sai Rishik", "Bhavesh", "Shlok Upponni", "Shiv Rishitha"], link: ZOOM_MEETING_URL },
-            { id: "SCH-009", day: "Saturday", time: "10:00 AM", hour: 10, minute: 0, level: "Beginner", students: ["Nyra", "Hayaan", "Aadhin"], link: ZOOM_MEETING_URL },
-            { id: "SCH-010", day: "Saturday", time: "3:00 PM", hour: 15, minute: 0, level: "Basic Beginner", students: ["Ira (1-2-1) Australia"], link: ZOOM_MEETING_URL },
-            { id: "SCH-011", day: "Saturday", time: "5:00 PM", hour: 17, minute: 0, level: "Advanced", students: ["Rishik"], link: ZOOM_MEETING_URL },
-            { id: "SCH-012", day: "Saturday", time: "7:15 PM", hour: 19, minute: 15, level: "Intermediate", students: ["Sanskriti Sarma", "Nitaant Sudhir", "Anvika Singhal", "Saatvik", "Amarashi", "Mandinu", "Ayaansh Gupta", "Achyuth"], link: ZOOM_MEETING_URL },
-            { id: "SCH-013", day: "Sunday", time: "10:00 AM", hour: 10, minute: 0, level: "Beginner", students: ["Hayaan", "Aadhin"], link: ZOOM_MEETING_URL },
-            { id: "SCH-014", day: "Sunday", time: "5:30 PM", hour: 17, minute: 30, level: "Intermediate", students: ["Manas", "Ayaansh Jangale", "Taashi", "Advika", "Ananthashayan", "Ruhika", "Krishnav"], link: ZOOM_MEETING_URL },
-            { id: "SCH-015", day: "Sunday", time: "7:00 PM", hour: 19, minute: 0, level: "Intermediate", students: ["Sanskriti Sarma", "Nitaant Sudhir", "Anvika Singhal", "Saatvik", "Amarashi", "Mandinu", "Ayaansh Gupta", "Achyuth", "Urjit"], link: ZOOM_MEETING_URL },
-            { id: "SCH-016", day: "Saturday", time: "9:00 PM", hour: 21, minute: 0, level: "Basic Beginner", students: ["Anvay (1-2-1) Canada"], link: ZOOM_MEETING_URL }
-        ];
-        for (const s of defaultSchedules) {
-            await executeQuery(
-                'INSERT INTO class_schedules (id, day, time, hour, minute, level, students, link) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                [s.id, s.day, s.time, s.hour, s.minute, s.level, s.students, s.link]
-            );
-        }
-        console.log('Seeded 16 class schedules into class_schedules table.');
+    // Always upsert Class Schedules so changes here take effect on restart
+    const defaultSchedules = [
+        { id: "SCH-001", day: "Tuesday",   time: "7:15 PM",  hour: 19, minute: 15, level: "Super Intermediate",   students: ["Anay", "Avyukth", "Aarnav Ramesh", "Vishrija", "Ananya", "Neeketchar", "Shourya Vihaan", "Shiv Rishitha"], link: ZOOM_MEETING_URL },
+        { id: "SCH-002", day: "Tuesday",   time: "9:00 PM",  hour: 21, minute: 0,  level: "Basic Beginner",        students: ["Agastya (1-2-1) USA"], link: ZOOM_MEETING_URL },
+        { id: "SCH-003", day: "Wednesday", time: "7:15 PM",  hour: 19, minute: 15, level: "Advanced",              students: ["Suraj R Nair", "Alphonse", "Vihaan Choudhary", "Nived", "Darshan V S", "Nirupam", "Rudransh", "Rohan Krishna"], link: ZOOM_MEETING_URL },
+        { id: "SCH-004", day: "Thursday",  time: "5:45 PM",  hour: 17, minute: 45, level: "Super Intermediate",   students: ["Anay", "Avyukth", "Aarnav Ramesh", "Urjit", "Ananya", "Shourya Vihaan"], link: ZOOM_MEETING_URL },
+        { id: "SCH-005", day: "Thursday",  time: "7:45 PM",  hour: 19, minute: 45, level: "Intermediate",         students: ["Manas", "Ayaansh Jangale", "Taashi", "Advika", "Ananthashayan", "Ruhika", "Krishnav", "Abhiram"], link: ZOOM_MEETING_URL },
+        { id: "SCH-006", day: "Thursday",  time: "9:00 PM",  hour: 21, minute: 0,  level: "Intermediate",         students: ["Nitaant (1-2-1) Germany"], link: ZOOM_MEETING_URL },
+        { id: "SCH-007", day: "Friday",    time: "5:45 PM",  hour: 17, minute: 45, level: "Advanced",              students: ["Suraj R Nair", "Alphonse", "Vihaan Choudhary", "Nived", "Darshan V S", "Nirupam", "Rudransh", "Rohan Krishna"], link: ZOOM_MEETING_URL },
+        { id: "SCH-008", day: "Saturday",  time: "7:15 AM",  hour: 7,  minute: 15, level: "Intermediate - TX",    students: ["Vedaang", "Sai Rishik", "Bhavesh", "Shlok Upponni", "Shiv Rishitha"], link: ZOOM_MEETING_URL },
+        { id: "SCH-009", day: "Saturday",  time: "10:00 AM", hour: 10, minute: 0,  level: "Beginner",              students: ["Nyra", "Hayaan", "Aadhin"], link: ZOOM_MEETING_URL },
+        { id: "SCH-010", day: "Saturday",  time: "3:00 PM",  hour: 15, minute: 0,  level: "Basic Beginner",        students: ["Ira (1-2-1) Australia"], link: ZOOM_MEETING_URL },
+        { id: "SCH-011", day: "Saturday",  time: "5:00 PM",  hour: 17, minute: 0,  level: "Advanced",              students: ["Rishik"], link: ZOOM_MEETING_URL },
+        { id: "SCH-012", day: "Saturday",  time: "7:15 PM",  hour: 19, minute: 15, level: "Intermediate",         students: ["Sanskriti Sarma", "Nitaant Sudhir", "Anvika Singhal", "Saatvik", "Amarashi", "Mandinu", "Ayaansh Gupta", "Achyuth"], link: ZOOM_MEETING_URL },
+        { id: "SCH-013", day: "Sunday",    time: "10:00 AM", hour: 10, minute: 0,  level: "Beginner",              students: ["Hayaan", "Aadhin"], link: ZOOM_MEETING_URL },
+        { id: "SCH-014", day: "Sunday",    time: "5:30 PM",  hour: 17, minute: 30, level: "Intermediate",         students: ["Manas", "Ayaansh Jangale", "Taashi", "Advika", "Ananthashayan", "Ruhika", "Krishnav"], link: ZOOM_MEETING_URL },
+        { id: "SCH-015", day: "Sunday",    time: "7:00 PM",  hour: 19, minute: 0,  level: "Intermediate",         students: ["Sanskriti Sarma", "Nitaant Sudhir", "Anvika Singhal", "Saatvik", "Amarashi", "Mandinu", "Ayaansh Gupta", "Achyuth", "Urjit"], link: ZOOM_MEETING_URL },
+        { id: "SCH-016", day: "Saturday",  time: "9:00 PM",  hour: 21, minute: 0,  level: "Basic Beginner",        students: ["Anvay (1-2-1) Canada"], link: ZOOM_MEETING_URL }
+    ];
+    for (const s of defaultSchedules) {
+        await executeQuery(
+            `INSERT INTO class_schedules (id, day, time, hour, minute, level, students, link)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (id) DO UPDATE SET
+                day = EXCLUDED.day,
+                time = EXCLUDED.time,
+                hour = EXCLUDED.hour,
+                minute = EXCLUDED.minute,
+                level = EXCLUDED.level,
+                students = EXCLUDED.students,
+                link = EXCLUDED.link`,
+            [s.id, s.day, s.time, s.hour, s.minute, s.level, s.students, encryptText(s.link)]
+        );
     }
+    console.log('Upserted 16 class schedules into class_schedules table.');
+
+    // Create Announcements table (coach posts visible to all students)
+    await executeQuery(`
+        CREATE TABLE IF NOT EXISTS announcements (
+            id         SERIAL PRIMARY KEY,
+            author_id  VARCHAR(50) NOT NULL,
+            title      VARCHAR(200) NOT NULL,
+            body       TEXT NOT NULL,
+            pinned     BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // Create Academy Tournaments table
+    await executeQuery(`
+        CREATE TABLE IF NOT EXISTS academy_tournaments (
+            id          SERIAL PRIMARY KEY,
+            title       VARCHAR(200) NOT NULL,
+            description TEXT,
+            start_date  VARCHAR(30),
+            status      VARCHAR(20) DEFAULT 'upcoming',
+            created_by  VARCHAR(50) NOT NULL,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // Create Tournament Registrations table
+    await executeQuery(`
+        CREATE TABLE IF NOT EXISTS tournament_registrations (
+            tournament_id INTEGER REFERENCES academy_tournaments(id) ON DELETE CASCADE,
+            student_id    VARCHAR(50) REFERENCES students(id) ON DELETE CASCADE,
+            registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (tournament_id, student_id)
+        )
+    `);
+
+    // Create Class Recordings table
+    await executeQuery(`
+        CREATE TABLE IF NOT EXISTS class_recordings (
+            id            SERIAL PRIMARY KEY,
+            schedule_id   VARCHAR(50) REFERENCES class_schedules(id) ON DELETE CASCADE,
+            title         VARCHAR(200),
+            recording_url TEXT NOT NULL,
+            recorded_at   DATE DEFAULT CURRENT_DATE,
+            added_by      VARCHAR(50)
+        )
+    `);
 
     // 2. Performance indexes for JOIN columns and email lookup (idempotent)
     await executeQuery('CREATE INDEX IF NOT EXISTS idx_student_badges_sid    ON student_badges(student_id)');
-    await executeQuery('CREATE INDEX IF NOT EXISTS idx_attendance_history_sid ON attendance_history(student_id)');
+
     await executeQuery('CREATE INDEX IF NOT EXISTS idx_student_puzzles_sid   ON student_puzzles(student_id)');
     await executeQuery('CREATE INDEX IF NOT EXISTS idx_students_lower_email  ON students(LOWER(email))');
+    await executeQuery('CREATE INDEX IF NOT EXISTS idx_homework_assignments_student_puzzle ON homework_assignments(student_id, puzzle_id)');
+    await executeQuery('CREATE INDEX IF NOT EXISTS idx_announcements_created ON announcements(created_at DESC)');
+    await executeQuery('CREATE INDEX IF NOT EXISTS idx_tournaments_status    ON academy_tournaments(status)');
+
 
     // 3. Check if we should seed or migrate from memory_db.json
     const jsonDbPath = path.join(__dirname, 'memory_db.json');
@@ -1177,8 +1404,7 @@ async function setupDatabaseSchema() {
             category: s.category ?? 'Beginner',
             gamesPlayed: s.games_played ?? 0,
             winCount: s.win_count ?? 0,
-            badges: s.badges ?? ['Beginner'],
-            attendance: s.attendance ?? []
+            badges: s.badges ?? ['Beginner']
         })).filter(s => !s.email.toLowerCase().endsWith('@mindsquare.com')) : [];
 
         // Seed all profiles atomically in a single transaction
@@ -1198,13 +1424,6 @@ async function setupDatabaseSchema() {
                         seedClient,
                         'INSERT INTO student_badges (student_id, badge_id) SELECT ?, unnest(?::text[])',
                         [s.id, s.badges]
-                    );
-                }
-                if (s.attendance.length > 0) {
-                    await executeClientQuery(
-                        seedClient,
-                        'INSERT INTO attendance_history (student_id, date) SELECT ?, unnest(?::text[])',
-                        [s.id, s.attendance]
                     );
                 }
             }
@@ -1240,7 +1459,21 @@ async function removeMockStudents() {
 
 // Shared row mapper — transforms an aggregated SQL row into the API StudentProfile shape
 function mapStudentRow(row) {
-    const attendanceHistory = row.attendance_history || [];
+    const solvedPuzzlesRaw = row.solved_puzzles || [];
+    const solvedPuzzles = [];
+    const solvedPuzzlesDetailed = [];
+    
+    for (const item of solvedPuzzlesRaw) {
+        if (typeof item === 'string' && item.includes(':')) {
+            const [puzzleId, solvedAt] = item.split(':');
+            solvedPuzzles.push(puzzleId);
+            solvedPuzzlesDetailed.push({ id: puzzleId, date: solvedAt });
+        } else {
+            solvedPuzzles.push(item);
+            solvedPuzzlesDetailed.push({ id: item, date: '' });
+        }
+    }
+
     return {
         id: row.id,
         name: row.name,
@@ -1254,18 +1487,27 @@ function mapStudentRow(row) {
         lastBirthdayRewardYear: row.last_birthday_reward_year,
         role: row.role || 'student',
         badges: row.badges || [],
-        solvedPuzzles: row.solved_puzzles || [],
-        coachingNotes: row.coaching_notes || '',
-        attendance: {
-            attended: attendanceHistory.length,
-            total: 20,
-            history: attendanceHistory
-        }
+        solvedPuzzles: solvedPuzzles,
+        solvedPuzzlesDetailed: solvedPuzzlesDetailed,
+        coachingNotes: row.coaching_notes || ''
     };
 }
 
 // Public leaderboard shape — no email, DOB, coaching notes, attendance history, or puzzles
 function sanitizeStudentPublic(student) {
+    let isBirthdayToday = false;
+    if (student.dob) {
+        try {
+            const today = new Date();
+            const currentMonthDay = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            const dobParts = student.dob.split('-');
+            if (dobParts.length === 3) {
+                isBirthdayToday = `${dobParts[1]}-${dobParts[2]}` === currentMonthDay;
+            }
+        } catch (e) {
+            console.error("Error checking student birthday sanitization:", e);
+        }
+    }
     return {
         id: student.id,
         name: student.name,
@@ -1274,7 +1516,8 @@ function sanitizeStudentPublic(student) {
         category: student.category,
         gamesPlayed: student.gamesPlayed,
         winCount: student.winCount,
-        badges: student.badges || []
+        badges: student.badges || [],
+        isBirthdayToday: isBirthdayToday
     };
 }
 
@@ -1295,76 +1538,71 @@ const STUDENT_SELECT_SQL = `
         s.id, s.name, s.email, s.avatar, s.points, s.category,
         s.games_played, s.win_count, s.dob, s.last_birthday_reward_year, s.role, s.coaching_notes,
         COALESCE(array_agg(DISTINCT b.badge_id)    FILTER (WHERE b.badge_id  IS NOT NULL), '{}') AS badges,
-        COALESCE(array_agg(DISTINCT p.puzzle_id)   FILTER (WHERE p.puzzle_id IS NOT NULL), '{}') AS solved_puzzles,
-        COALESCE(array_agg(a.date ORDER BY a.date) FILTER (WHERE a.date      IS NOT NULL), '{}') AS attendance_history
+        COALESCE(array_agg(DISTINCT p.puzzle_id || ':' || COALESCE(p.solved_at::text, '')) FILTER (WHERE p.puzzle_id IS NOT NULL), '{}') AS solved_puzzles
     FROM students s
     LEFT JOIN student_badges     b ON b.student_id = s.id
     LEFT JOIN student_puzzles    p ON p.student_id = s.id
-    LEFT JOIN attendance_history a ON a.student_id = s.id
 `;
-// Perform monthly points decay (decrease points of non-teacher students by 100 for each elapsed month)
+// Perform monthly points decay (decrease points of students by 100 for each elapsed month)
 async function performMonthlyPointsDecay() {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        // Retrieve non-teacher profiles to check decay eligibility
-        const students = await executeClientQuery(client, `
-            SELECT id, points, created_at, COALESCE(last_decay_date, created_at) as last_decay
-            FROM students 
-            WHERE role != 'teacher'
+        // 1. Identify and update students whose points decay in a single transaction
+        const updatedRows = await executeClientQuery(client, `
+            WITH decay_eligible AS (
+                SELECT 
+                    id, 
+                    points, 
+                    COALESCE(last_decay_date, created_at) AS last_decay,
+                    FLOOR(EXTRACT(epoch FROM (NOW() - COALESCE(last_decay_date, created_at))) / 2592000)::integer AS elapsed_months
+                FROM students
+            ),
+            decay_calculations AS (
+                SELECT
+                    id,
+                    elapsed_months,
+                    GREATEST(0, points - (100 * elapsed_months)) AS new_points,
+                    (last_decay + (elapsed_months * INTERVAL '30 days')) AS new_decay_date
+                FROM decay_eligible
+                WHERE elapsed_months > 0
+            )
+            UPDATE students s
+            SET 
+                points = c.new_points,
+                last_decay_date = c.new_decay_date,
+                category = CASE
+                    WHEN c.new_points >= 10000 THEN 'Grandmaster'
+                    WHEN c.new_points >= 5000 THEN 'Super Advanced'
+                    WHEN c.new_points >= 3500 THEN 'Advanced'
+                    WHEN c.new_points >= 2500 THEN 'Super Intermediate'
+                    WHEN c.new_points >= 1500 THEN 'Intermediate'
+                    ELSE 'Beginner'
+                END
+            FROM decay_calculations c
+            WHERE s.id = c.id
+            RETURNING s.id
         `);
 
-        const now = new Date();
-        for (const s of students) {
-            const lastDecay = s.last_decay ? new Date(s.last_decay) : new Date(s.created_at);
-            const diffMs = now.getTime() - lastDecay.getTime();
-            // 30 days = 30 * 24 * 60 * 60 * 1000 ms
-            const elapsedMonths = Math.floor(diffMs / (30 * 24 * 60 * 60 * 1000));
+        // 2. Delete milestone badges if points decay below corresponding levels
+        await executeClientQuery(client, `
+            DELETE FROM student_badges sb
+            USING students s
+            WHERE sb.student_id = s.id
+              AND (
+                  (sb.badge_id = 'Grandmaster' AND s.points < 10000) OR
+                  (sb.badge_id = 'Super Advanced' AND s.points < 5000) OR
+                  (sb.badge_id = 'Advanced' AND s.points < 3500) OR
+                  (sb.badge_id = 'Super Intermediate' AND s.points < 2500) OR
+                  (sb.badge_id = 'Intermediate' AND s.points < 1500)
+              )
+        `);
 
-            if (elapsedMonths > 0) {
-                let newPoints = s.points - (100 * elapsedMonths);
-                if (newPoints < 0) newPoints = 0;
-
-                // Determine category tier
-                let category = 'Beginner';
-                if (newPoints >= 10000) category = 'Grandmaster';
-                else if (newPoints >= 5000) category = 'Super Advanced';
-                else if (newPoints >= 3500) category = 'Advanced';
-                else if (newPoints >= 2500) category = 'Super Intermediate';
-                else if (newPoints >= 1500) category = 'Intermediate';
-
-                // Calculate new last_decay_date boundary
-                const newDecayTime = lastDecay.getTime() + (elapsedMonths * 30 * 24 * 60 * 60 * 1000);
-                const newDecayDate = new Date(newDecayTime);
-
-                await executeClientQuery(client, `
-                    UPDATE students 
-                    SET points = ?, category = ?, last_decay_date = ?
-                    WHERE id = ?
-                `, [newPoints, category, newDecayDate, s.id]);
-
-                // Delete milestone badges if points decay below corresponding levels
-                if (newPoints < 10000) {
-                    await executeClientQuery(client, "DELETE FROM student_badges WHERE student_id = ? AND badge_id = 'Grandmaster'", [s.id]);
-                }
-                if (newPoints < 5000) {
-                    await executeClientQuery(client, "DELETE FROM student_badges WHERE student_id = ? AND badge_id = 'Super Advanced'", [s.id]);
-                }
-                if (newPoints < 3500) {
-                    await executeClientQuery(client, "DELETE FROM student_badges WHERE student_id = ? AND badge_id = 'Advanced'", [s.id]);
-                }
-                if (newPoints < 2500) {
-                    await executeClientQuery(client, "DELETE FROM student_badges WHERE student_id = ? AND badge_id = 'Super Intermediate'", [s.id]);
-                }
-                if (newPoints < 1500) {
-                    await executeClientQuery(client, "DELETE FROM student_badges WHERE student_id = ? AND badge_id = 'Intermediate'", [s.id]);
-                }
-
-                console.log(`Monthly ELO Decay: Student ${s.id} reduced from ${s.points} to ${newPoints} points (${elapsedMonths} month(s) elapsed)`);
-            }
-        }
         await client.query('COMMIT');
+        if (updatedRows && updatedRows.length > 0) {
+            console.log(`Monthly ELO Decay: Batch updated ${updatedRows.length} student profile(s).`);
+        }
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('Failed to perform monthly points decay:', err);
@@ -1375,13 +1613,35 @@ async function performMonthlyPointsDecay() {
 
 const STUDENT_GROUP_BY = 'GROUP BY s.id, s.name, s.email, s.avatar, s.points, s.category, s.games_played, s.win_count, s.dob, s.last_birthday_reward_year, s.role, s.coaching_notes';
 
-// Load all students — 1 DB round-trip via aggregated JOIN query
-async function getStudentsDetailedList() {
-    const cached = cache.get('students:list');
-    if (cached) return cached;
-    const rows = await executeQuery(`${STUDENT_SELECT_SQL} ${STUDENT_GROUP_BY} ORDER BY s.points DESC`);
-    const result = rows.map(mapStudentRow);
-    cache.set('students:list', result, CACHE_TTL_STUDENTS);
+// Load students — supporting pagination & search, using cache for standard leaderboard requests
+async function getStudentsDetailedList({ limit = 100, offset = 0, search = '' } = {}) {
+    const isDefaultLeaderboard = limit === 100 && offset === 0 && !search;
+    if (isDefaultLeaderboard) {
+        const cached = await cache.get('students:leaderboard');
+        if (cached) return cached;
+    }
+
+    let query = STUDENT_SELECT_SQL;
+    const params = [];
+
+    if (search) {
+        // ILIKE performs case-insensitive pattern matching.
+        query += ` WHERE (s.name ILIKE ? OR s.email ILIKE ? OR s.id ILIKE ?) `;
+        const searchParam = `%${search}%`;
+        params.push(searchParam, searchParam, searchParam);
+    }
+
+    query += ` ${STUDENT_GROUP_BY} ORDER BY s.points DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const rows = await executeQuery(query, params);
+    // Exclude the academy owner account from the public leaderboard
+    const ADMIN_EMAIL = 'mindsquarechessclass@gmail.com';
+    const result = rows.map(mapStudentRow).filter(s => s.email?.toLowerCase() !== ADMIN_EMAIL);
+
+    if (isDefaultLeaderboard) {
+        await cache.set('students:leaderboard', result, CACHE_TTL_STUDENTS);
+    }
     return result;
 }
 
@@ -1398,21 +1658,15 @@ async function getStudentById(id) {
 
 // Public app configuration (non-sensitive client-side settings)
 app.get('/api/config', (req, res) => {
-    res.json({ googleClientId: GOOGLE_CLIENT_ID });
+    res.json({
+        googleClientId: GOOGLE_CLIENT_ID,
+        isProduction: process.env.NODE_ENV === 'production'
+    });
 });
 
-// Get all students (Leaderboard)
-app.get('/api/students', async (req, res) => {
+// Get all class schedules (guests receive sanitized list, authenticated users get Zoom details and PII)
+app.get('/api/schedules', async (req, res) => {
     try {
-        await performMonthlyPointsDecay();
-        const students = await getStudentsDetailedList();
-
-        // Filter out teachers so they do not appear in any leaderboard datasets
-        const nonTeacherStudents = students.filter(student => student.role !== 'teacher');
-
-        // Check if caller is teacher to decide whether to include emails.
-        // Prefer HttpOnly cookie (ms_session_v2) — consistent with cookie-based auth migration.
-        let isTeacher = false;
         let token = req.cookies?.ms_session_v2 || null;
         if (!token) {
             const authHeader = req.headers['authorization'];
@@ -1420,18 +1674,71 @@ app.get('/api/students', async (req, res) => {
                 token = authHeader.substring(7);
             }
         }
+
+        let isAuthenticated = false;
         if (token) {
             const decoded = verifySessionToken(token);
-            if (decoded && decoded.role === 'teacher') {
-                isTeacher = true;
+            if (decoded) {
+                isAuthenticated = true;
             }
         }
-        // SECURITY: Removed X-Caller-Id teacher detection (was leaking PII to anyone setting the header).
 
-        // Teachers receive full profiles; everyone else gets public leaderboard fields only
-        const sanitizedStudents = nonTeacherStudents.map(student =>
-            isTeacher ? student : sanitizeStudentPublic(student)
-        );
+        const schedules = await executeQuery('SELECT * FROM class_schedules');
+
+        if (isAuthenticated) {
+            const decryptedSchedules = schedules.map(s => ({
+                ...s,
+                studentCount: s.students ? s.students.length : 0,
+                link: decryptText(s.link)
+            }));
+            res.json(decryptedSchedules);
+        } else {
+            // guest gets sanitized schedules (protect PII and Zoom links)
+            const sanitized = schedules.map(s => ({
+                id: s.id,
+                day: s.day,
+                time: s.time,
+                hour: s.hour,
+                minute: s.minute,
+                level: s.level,
+                students: [], 
+                studentCount: s.students ? s.students.length : 0,
+                link: '#'
+            }));
+            res.json(sanitized);
+        }
+    } catch (err) {
+        console.error('Failed to retrieve class schedules:', err);
+        res.status(500).json({ error: 'Failed to retrieve schedules' });
+    }
+});
+
+// Get all students (Leaderboard with search & pagination)
+app.get('/api/students', async (req, res) => {
+    try {
+        // SECURITY: Cap search string to 100 chars to prevent oversized query parameters
+        let search = req.query.search ? String(req.query.search).trim() : '';
+        if (search.length > 100) search = search.substring(0, 100);
+        
+        let limit = parseInt(req.query.limit, 10);
+        if (isNaN(limit) || limit <= 0) {
+            limit = 100;
+        }
+        
+        let offset = parseInt(req.query.offset, 10);
+        if (isNaN(offset) || offset < 0) {
+            offset = 0;
+        }
+
+        // Safety limit to prevent abuse
+        if (limit > 500) {
+            limit = 500;
+        }
+
+        const students = await getStudentsDetailedList({ limit, offset, search });
+
+        // Everyone gets public leaderboard fields only
+        const sanitizedStudents = students.map(student => sanitizeStudentPublic(student));
         res.json(sanitizedStudents);
     } catch (err) {
         console.error(err);
@@ -1446,7 +1753,10 @@ app.get('/api/students/me', authenticate, async (req, res) => {
         if (!profile) {
             return res.status(404).json({ error: 'Profile not found' });
         }
-        res.json(profile);
+        // SECURITY: Strip coaching_notes — these are confidential coach-only observations.
+        // Students should not be able to read notes their coach has written about them.
+        const { coachingNotes: _stripped, ...safeProfile } = profile;
+        res.json(safeProfile);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to retrieve profile' });
@@ -1455,10 +1765,34 @@ app.get('/api/students/me', authenticate, async (req, res) => {
 
 // Login / Register Google or Mock profile
 app.post('/api/students/login', dbAuthRateLimiter, validateBodySchema(LOGIN_SCHEMA), async (req, res) => {
-    const { email, name, avatar } = req.body;
+    let { credential, email, name, avatar } = req.body;
 
-    // Process points decay before login check
-    await performMonthlyPointsDecay();
+    if (credential) {
+        try {
+            const { OAuth2Client } = require('google-auth-library');
+            const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+            const ticket = await googleClient.verifyIdToken({
+                idToken: credential,
+                audience: GOOGLE_CLIENT_ID
+            });
+            const payload = ticket.getPayload();
+            email = payload.email;
+            name = payload.name;
+            avatar = payload.picture;
+        } catch (authErr) {
+            logSecurityEvent('WARN', 'GOOGLE_AUTH_FAILED', req, { error: authErr.message });
+            return res.status(401).json({ error: 'Invalid Google login credentials' });
+        }
+    } else {
+        // Block passwordless mock logins when explicitly disabled (use DISABLE_MOCK_LOGIN=true in .env)
+        if (process.env.DISABLE_MOCK_LOGIN === 'true') {
+            logSecurityEvent('WARN', 'MOCK_LOGIN_ATTEMPT_BLOCKED', req);
+            return res.status(400).json({ error: 'Direct email login is disabled.' });
+        }
+        if (!email || !name) {
+            return res.status(400).json({ error: 'Email and Name are required for development mock login.' });
+        }
+    }
 
     const client = await pool.connect();
     try {
@@ -1470,8 +1804,9 @@ app.post('/api/students/login', dbAuthRateLimiter, validateBodySchema(LOGIN_SCHE
         // Check if student already exists
         const rows = await executeClientQuery(client, 'SELECT id FROM students WHERE LOWER(email) = LOWER(?)', [email]);
 
-        // Teacher role removed from the product — every account is a student.
-        const role = 'student';
+        // Teacher role for the designated teacher email; everyone else is a student
+        const teacherEmail = (process.env.TEACHER_EMAIL || '').toLowerCase();
+        const role = email.toLowerCase() === teacherEmail ? 'teacher' : 'student';
 
         let studentId;
         if (rows.length > 0) {
@@ -1479,6 +1814,25 @@ app.post('/api/students/login', dbAuthRateLimiter, validateBodySchema(LOGIN_SCHE
             // Update role on login to stay in sync with configuration changes
             await executeClientQuery(client, 'UPDATE students SET role = ? WHERE id = ?', [role, studentId]);
         } else {
+            // Whitelist verification for new student registrations
+            const allowedEmailsStr = process.env.ALLOWED_EMAILS || '';
+            const allowedDomainsStr = process.env.ALLOWED_EMAIL_DOMAINS || '';
+
+            const allowedEmails = allowedEmailsStr.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+            const allowedDomains = allowedDomainsStr.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+
+            const emailLower = email.toLowerCase();
+            const emailDomain = emailLower.split('@')[1] || '';
+
+            const isAllowedEmail = allowedEmails.length === 0 || allowedEmails.includes(emailLower);
+            const isAllowedDomain = allowedDomains.length === 0 || allowedDomains.includes(emailDomain);
+
+            if (!isAllowedEmail && !isAllowedDomain) {
+                await client.query('ROLLBACK');
+                logSecurityEvent('WARN', 'REGISTRATION_BLOCKED_BY_WHITELIST', req, { email });
+                return res.status(403).json({ error: 'Registration is restricted. Contact administrator to whitelist your email.' });
+            }
+
             // Register new student - find the maximum existing MS-XXX ID to prevent key duplication
             const maxIdRows = await executeClientQuery(
                 client,
@@ -1524,8 +1878,8 @@ app.post('/api/students/login', dbAuthRateLimiter, validateBodySchema(LOGIN_SCHE
         // Clean up expired refresh tokens for clean DB
         await executeQuery('DELETE FROM refresh_tokens WHERE student_id = ? AND expires_at < NOW()', [profile.id]);
 
-        // Set secure cookies
-        const isProd = process.env.NODE_ENV === 'production';
+        // Set secure cookies — use COOKIE_SECURE=true only when served over HTTPS
+        const isProd = process.env.COOKIE_SECURE === 'true';
         res.cookie('ms_session_v2', token, {
             httpOnly: true,
             sameSite: 'Strict',
@@ -1640,7 +1994,7 @@ app.post('/api/auth/refresh', async (req, res) => {
         await client.query('COMMIT');
 
         // Set cookies
-        const isProd = process.env.NODE_ENV === 'production';
+        const isProd = process.env.COOKIE_SECURE === 'true';
         res.cookie('ms_session_v2', newAccessToken, {
             httpOnly: true,
             sameSite: 'Strict',
@@ -1674,7 +2028,8 @@ app.post('/api/auth/refresh', async (req, res) => {
 });
 
 // POST /api/auth/logout - Clear all cookies
-app.post('/api/auth/logout', async (req, res) => {
+// SECURITY: CSRF validation added — prevents forced-logout attacks via cross-site form submissions.
+app.post('/api/auth/logout', validateCSRF, async (req, res) => {
     const refreshToken = req.cookies['ms_refresh'];
     if (refreshToken) {
         try {
@@ -1694,7 +2049,7 @@ app.post('/api/auth/logout', async (req, res) => {
 app.put('/api/students/:id/name', authenticate, validateBodySchema(UPDATE_NAME_SCHEMA), async (req, res) => {
     const { id } = req.params;
     const { name } = req.body;
-    if (req.user.role !== 'teacher' && req.user.id !== id) {
+    if (req.user.id !== id) {
         return res.status(403).json({ error: 'Forbidden: You cannot modify other student profiles' });
     }
 
@@ -1719,7 +2074,7 @@ app.put('/api/students/:id/name', authenticate, validateBodySchema(UPDATE_NAME_S
 app.put('/api/students/:id/avatar', authenticate, validateBodySchema(UPDATE_AVATAR_SCHEMA), async (req, res) => {
     const { id } = req.params;
     const { avatar } = req.body;
-    if (req.user.role !== 'teacher' && req.user.id !== id) {
+    if (req.user.id !== id) {
         return res.status(403).json({ error: 'Forbidden: You cannot modify other student profiles' });
     }
 
@@ -1743,7 +2098,7 @@ app.put('/api/students/:id/avatar', authenticate, validateBodySchema(UPDATE_AVAT
 // DELETE /api/students/:id - Secure data deletion endpoint (6. Privacy / GDPR)
 app.delete('/api/students/:id', authenticate, async (req, res) => {
     const { id } = req.params;
-    if (req.user.role !== 'teacher' && req.user.id !== id) {
+    if (req.user.id !== id) {
         return res.status(403).json({ error: 'Forbidden: You can only delete your own account data' });
     }
 
@@ -1774,39 +2129,12 @@ app.delete('/api/students/:id', authenticate, async (req, res) => {
     }
 });
 
-// Register attendance for today
-app.post('/api/students/:id/attendance', authenticate, validateBodySchema(ATTENDANCE_LOG_SCHEMA), async (req, res) => {
-    const { id } = req.params;
-    const { date } = req.body; // YYYY-MM-DD
-    if (req.user.role !== 'teacher' && req.user.id !== id) {
-        return res.status(403).json({ error: 'Forbidden: You cannot modify other student profiles' });
-    }
 
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        await executeClientQuery(
-            client,
-            'INSERT INTO attendance_history (student_id, date) VALUES (?, ?) ON CONFLICT(student_id, date) DO NOTHING',
-            [id, date]
-        );
-        await client.query('COMMIT');
-
-        const profile = await getStudentById(id);
-        res.json(profile);
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error(err);
-        res.status(500).json({ error: 'Failed to log attendance' });
-    } finally {
-        client.release();
-    }
-});
 
 // Update points, category, badges, gameplay statistics & solved puzzles
-app.post('/api/students/:id/stats', authenticate, validateBodySchema(UPDATE_STATS_SCHEMA), async (req, res) => {
+app.post('/api/students/:id/stats', statsRateLimiter, authenticate, validateBodySchema(UPDATE_STATS_SCHEMA), async (req, res) => {
     const { id } = req.params;
-    if (req.user.id !== id && req.user.role !== 'teacher') {
+    if (req.user.id !== id) {
         return res.status(403).json({ error: 'Forbidden: You cannot modify another student\'s statistics' });
     }
     const { points, gamesPlayed, winCount, badges, solvedPuzzles } = req.body;
@@ -1814,6 +2142,40 @@ app.post('/api/students/:id/stats', authenticate, validateBodySchema(UPDATE_STAT
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+
+        // Fetch current profile to validate increments (data integrity check)
+        // Lock the row to prevent concurrent race conditions
+        const currentRows = await executeClientQuery(client, 'SELECT points, games_played, win_count FROM students WHERE id = ? FOR UPDATE', [id]);
+        if (currentRows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Student not found' });
+        }
+        const current = currentRows[0];
+
+        // Sanity validations:
+        const pointsDiff = points - current.points;
+        const gamesDiff = gamesPlayed - current.games_played;
+        const winDiff = winCount - current.win_count;
+
+        // Prevent tampering: stats can never decrease, and points/win gains must be proportional to games played
+        if (gamesDiff < 0 || winDiff < 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Data integrity violation: Statistics cannot decrease.' });
+        }
+        if (winDiff > gamesDiff) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Data integrity violation: Win count increase cannot exceed games played increase.' });
+        }
+        // Limit maximum points earned per game/puzzle solving to prevent massive score manipulation
+        // (A single puzzle/game awards at most 50-100 points, so any gain > 200 per game is highly suspicious/tampered)
+        if (pointsDiff > 0 && gamesDiff === 0 && pointsDiff > 100) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Data integrity violation: Unreasonable point increment without game completion.' });
+        }
+        if (pointsDiff > 0 && gamesDiff > 0 && pointsDiff > gamesDiff * 150) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Data integrity violation: Points increment exceeds maximum allowance per game.' });
+        }
 
         // Update basic metrics
         let category = 'Beginner';
@@ -1864,7 +2226,7 @@ app.post('/api/students/:id/stats', authenticate, validateBodySchema(UPDATE_STAT
 // Update Date of Birth and trigger immediate birthday check
 app.put('/api/students/:id/dob', authenticate, validateBodySchema(UPDATE_DOB_SCHEMA), async (req, res) => {
     const { id } = req.params;
-    if (req.user.id !== id && req.user.role !== 'teacher') {
+    if (req.user.id !== id) {
         return res.status(403).json({ error: 'Forbidden: You cannot update another student\'s Date of Birth' });
     }
     const { dob } = req.body;
@@ -1873,15 +2235,21 @@ app.put('/api/students/:id/dob', authenticate, validateBodySchema(UPDATE_DOB_SCH
     try {
         await client.query('BEGIN');
 
-        // Lock the row to prevent updates during verification
-        await executeClientQuery(client, 'SELECT points, last_birthday_reward_year FROM students WHERE id = ? FOR UPDATE', [id]);
+        // Lock the row to prevent updates and verify if DOB is already set (DOB locking)
+        const checkRows = await executeClientQuery(client, 'SELECT points, dob, last_birthday_reward_year FROM students WHERE id = ? FOR UPDATE', [id]);
+        if (checkRows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Student profile not found' });
+        }
+        const student = checkRows[0];
+        if (student.dob) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Date of Birth is already set and locked.' });
+        }
 
         // Update DOB
         await executeClientQuery(client, 'UPDATE students SET dob = ? WHERE id = ?', [dob, id]);
 
-        // Fetch current points and reward status
-        const rows = await executeClientQuery(client, 'SELECT points, last_birthday_reward_year FROM students WHERE id = ?', [id]);
-        const student = rows[0];
         let rewarded = false;
         let updatedPoints = student.points;
 
@@ -1917,10 +2285,45 @@ app.put('/api/students/:id/dob', authenticate, validateBodySchema(UPDATE_DOB_SCH
     }
 });
 
+// Get student's homework assignments
+app.get('/api/students/:id/homework', authenticate, async (req, res) => {
+    const { id } = req.params;
+    if (req.user.id !== id && req.user.role !== 'coach') {
+        return res.status(403).json({ error: 'Forbidden: You cannot access this student\'s homework' });
+    }
+    try {
+        const rows = await executeQuery('SELECT * FROM homework_assignments WHERE student_id = ?', [id]);
+        const homework = rows.map(mapHomeworkRow);
+        res.json(homework);
+    } catch (err) {
+        console.error('Failed to get homework:', err);
+        res.status(500).json({ error: 'Failed to retrieve homework assignments' });
+    }
+});
+
+// Complete homework assignment
+app.put('/api/students/:id/homework/:assignmentId/complete', authenticate, async (req, res) => {
+    const { id, assignmentId } = req.params;
+    if (req.user.id !== id) {
+        return res.status(403).json({ error: 'Forbidden: You cannot complete another student\'s homework' });
+    }
+    try {
+        await executeQuery('UPDATE homework_assignments SET completed = TRUE WHERE id = ? AND student_id = ?', [assignmentId, id]);
+        const rows = await executeQuery('SELECT * FROM homework_assignments WHERE id = ?', [assignmentId]);
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Homework assignment not found' });
+        }
+        res.json(mapHomeworkRow(rows[0]));
+    } catch (err) {
+        console.error('Failed to complete homework:', err);
+        res.status(500).json({ error: 'Failed to complete homework assignment' });
+    }
+});
+
 // Check and apply annual birthday reward (points)
 app.post('/api/students/:id/check-birthday', authenticate, async (req, res) => {
     const { id } = req.params;
-    if (req.user.id !== id && req.user.role !== 'teacher') {
+    if (req.user.id !== id) {
         return res.status(403).json({ error: 'Forbidden: You cannot check another student\'s birthday reward' });
     }
     const client = await pool.connect();
@@ -1974,466 +2377,260 @@ app.post('/api/students/:id/check-birthday', authenticate, async (req, res) => {
     }
 });
 
-// Middleware: teacher role removed.
-// All /api/teachers/* endpoints now return 410 Gone (deprecated and intentionally disabled).
-async function checkIsTeacher(req, res, next) {
-    return res.status(410).json({ error: 'Teacher functionality has been removed from this product.' });
-}
 
-// Teacher endpoint: Award or adjust points of any student
-app.put('/api/teachers/students/:id/points', checkIsTeacher, validateBodySchema(TEACHER_EDIT_POINTS_SCHEMA), async (req, res) => {
-    const { id } = req.params;
-    const { points } = req.body;
-    const client = await pool.connect();
+// ============================================================
+// ANNOUNCEMENTS API
+// ============================================================
+
+// GET /api/announcements — public, returns recent + pinned
+app.get('/api/announcements', async (req, res) => {
     try {
-        await client.query('BEGIN');
-
-        // Determine category based on points
-        let category = 'Beginner';
-        if (points >= 10000) {
-            category = 'Grandmaster';
-        } else if (points >= 5000) {
-            category = 'Super Advanced';
-        } else if (points >= 3500) {
-            category = 'Advanced';
-        } else if (points >= 2500) {
-            category = 'Super Intermediate';
-        } else if (points >= 1500) {
-            category = 'Intermediate';
-        }
-
-        await executeClientQuery(client, 'UPDATE students SET points = ?, category = ? WHERE id = ?', [points, category, id]);
-
-        // Insert badges dynamically corresponding to milestone levels
-        if (points >= 1500) {
-            await executeClientQuery(client, 'INSERT INTO student_badges (student_id, badge_id) VALUES (?, ?) ON CONFLICT (student_id, badge_id) DO NOTHING', [id, 'Intermediate']);
-        }
-        if (points >= 2500) {
-            await executeClientQuery(client, 'INSERT INTO student_badges (student_id, badge_id) VALUES (?, ?) ON CONFLICT (student_id, badge_id) DO NOTHING', [id, 'Super Intermediate']);
-        }
-        if (points >= 3500) {
-            await executeClientQuery(client, 'INSERT INTO student_badges (student_id, badge_id) VALUES (?, ?) ON CONFLICT (student_id, badge_id) DO NOTHING', [id, 'Advanced']);
-        }
-        if (points >= 5000) {
-            await executeClientQuery(client, 'INSERT INTO student_badges (student_id, badge_id) VALUES (?, ?) ON CONFLICT (student_id, badge_id) DO NOTHING', [id, 'Super Advanced']);
-        }
-        if (points >= 10000) {
-            await executeClientQuery(client, 'INSERT INTO student_badges (student_id, badge_id) VALUES (?, ?) ON CONFLICT (student_id, badge_id) DO NOTHING', [id, 'Grandmaster']);
-        }
-
-        await logAuditTrail(client, req.user.id, 'AWARD_POINTS', id, `Updated student points to ${points}`);
-
-        await client.query('COMMIT');
-
-        const profile = await getStudentById(id);
-        res.json(profile);
+        const rows = await executeQuery(
+            `SELECT a.id, a.title, a.body, a.pinned, a.created_at, s.name as author_name, s.avatar as author_avatar
+             FROM announcements a
+             JOIN students s ON s.id = a.author_id
+             ORDER BY a.pinned DESC, a.created_at DESC
+             LIMIT 20`
+        );
+        res.json(rows);
     } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Failed to update student points:', err);
-        res.status(500).json({ error: 'Failed to update student points' });
-    } finally {
-        client.release();
+        console.error('Failed to fetch announcements:', err);
+        res.status(500).json({ error: 'Failed to fetch announcements' });
     }
 });
 
-// Teacher endpoint: Grant a badge to a student
-app.post('/api/teachers/students/:id/badges', checkIsTeacher, validateBodySchema(ADD_BADGE_SCHEMA), async (req, res) => {
-    const { id } = req.params;
-    const { badgeId } = req.body;
-    const client = await pool.connect();
+// POST /api/announcements — teacher only
+app.post('/api/announcements', authenticate, async (req, res) => {
+    if (req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Only the teacher can post announcements.' });
+    }
+    const { title, body, pinned } = req.body;
+    if (!title || !body) return res.status(400).json({ error: 'Title and body are required.' });
     try {
-        await client.query('BEGIN');
-        await executeClientQuery(
-            client,
-            'INSERT INTO student_badges (student_id, badge_id) VALUES (?, ?) ON CONFLICT (student_id, badge_id) DO NOTHING',
-            [id, badgeId]
+        const rows = await executeQuery(
+            'INSERT INTO announcements (author_id, title, body, pinned) VALUES (?, ?, ?, ?) RETURNING *',
+            [req.user.id, title.substring(0, 200), body.substring(0, 2000), !!pinned]
         );
-        await logAuditTrail(client, req.user.id, 'GRANT_BADGE', id, `Granted badge: ${badgeId}`);
-        await client.query('COMMIT');
-
-        const profile = await getStudentById(id);
-        res.json(profile);
+        res.json(rows[0]);
     } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Failed to add badge to student:', err);
-        res.status(500).json({ error: 'Failed to add badge to student' });
-    } finally {
-        client.release();
+        console.error('Failed to create announcement:', err);
+        res.status(500).json({ error: 'Failed to create announcement' });
     }
 });
 
-// Teacher endpoint: Revoke a badge from a student
-app.delete('/api/teachers/students/:id/badges/:badgeId', checkIsTeacher, async (req, res) => {
-    const { id, badgeId } = req.params;
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        await executeClientQuery(
-            client,
-            'DELETE FROM student_badges WHERE student_id = ? AND badge_id = ?',
-            [id, badgeId]
-        );
-        await logAuditTrail(client, req.user.id, 'REVOKE_BADGE', id, `Revoked badge: ${badgeId}`);
-        await client.query('COMMIT');
-
-        const profile = await getStudentById(id);
-        res.json(profile);
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Failed to delete badge from student:', err);
-        res.status(500).json({ error: 'Failed to delete badge from student' });
-    } finally {
-        client.release();
-    }
-});
-
-// ==============================================
-// TEACHER SUITE: NEW ENDPOINTS
-// ==============================================
-
-// 1. HOMEWORK ASSIGNMENTS
-// Assign homework to a single student
-app.post('/api/teachers/homework', checkIsTeacher, validateBodySchema(ASSIGN_HOMEWORK_SCHEMA), async (req, res) => {
-    const { studentId, puzzleId } = req.body;
-
-    // Guard: refuse to assign homework to a teacher account
-    try {
-        const target = await getStudentById(studentId);
-        if (target) {
-            const teacherEmailsLower = TEACHER_EMAILS.map(e => e.toLowerCase());
-            const isTeacherRole = target.role === 'teacher';
-            const isTeacherEmail = target.email && teacherEmailsLower.includes(target.email.toLowerCase());
-            if (isTeacherRole || isTeacherEmail) {
-                return res.status(400).json({ error: 'Cannot assign homework to a teacher account' });
-            }
-        }
-    } catch (guardErr) {
-        console.error('Teacher guard check failed:', guardErr);
-    }
-
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        await executeClientQuery(
-            client,
-            'INSERT INTO homework_assignments (student_id, puzzle_id) VALUES (?, ?)',
-            [studentId, puzzleId]
-        );
-        await logAuditTrail(client, req.user.id, 'ASSIGN_HOMEWORK', studentId, `Assigned homework puzzle ${puzzleId}`);
-        await client.query('COMMIT');
-
-        // Fetch updated homework list for the student
-        const homework = await executeQuery(
-            'SELECT * FROM homework_assignments WHERE student_id = ? ORDER BY assigned_at DESC',
-            [studentId]
-        );
-        res.json({ homework: homework.map(mapHomeworkRow) });
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Failed to assign homework:', err);
-        res.status(500).json({ error: 'Failed to assign homework' });
-    } finally {
-        client.release();
-    }
-});
-
-// Assign homework to ALL non-teacher students at once
-app.post('/api/teachers/homework/all', checkIsTeacher, validateBodySchema(ASSIGN_HOMEWORK_ALL_SCHEMA), async (req, res) => {
-    const { puzzleId } = req.body;
-
-    const client = await pool.connect();
-    try {
-        // Fetch all students, then filter server-side:
-        // Exclude rows with role='teacher' AND exclude any email in TEACHER_EMAILS list
-        // (double-filtered so teachers who haven't re-logged in are also skipped)
-        const allRows = await executeQuery("SELECT id, email, role FROM students");
-
-        const teacherEmailsLower = TEACHER_EMAILS.map(e => e.toLowerCase());
-
-        const studentRows = (allRows || []).filter(row => {
-            const isTeacherRole = row.role === 'teacher';
-            const isTeacherEmail = row.email && teacherEmailsLower.includes(row.email.toLowerCase());
-            return !isTeacherRole && !isTeacherEmail;
-        });
-
-        if (studentRows.length === 0) {
-            return res.status(404).json({ error: 'No students found to assign homework to' });
-        }
-
-        await client.query('BEGIN');
-        let assignedCount = 0;
-        for (const row of studentRows) {
-            try {
-                await executeClientQuery(
-                    client,
-                    'INSERT INTO homework_assignments (student_id, puzzle_id) VALUES (?, ?) ON CONFLICT DO NOTHING',
-                    [row.id, puzzleId]
-                );
-                assignedCount++;
-            } catch (e) {
-                // Skip if student already has this puzzle assigned — keep going
-                console.warn(`Skipping duplicate for student ${row.id}:`, e.message);
-            }
-        }
-        await logAuditTrail(client, req.user.id, 'ASSIGN_HOMEWORK_ALL', 'ALL', `Bulk assigned homework puzzle ${puzzleId} to ${assignedCount} students`);
-        await client.query('COMMIT');
-
-        res.json({
-            success: true,
-            assignedCount,
-            totalStudents: studentRows.length,
-            puzzleId
-        });
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Failed to bulk-assign homework:', err);
-        res.status(500).json({ error: 'Failed to assign homework to all students' });
-    } finally {
-        client.release();
-    }
-});
-
-
-
-// Get student homework
-app.get('/api/students/:id/homework', authenticate, async (req, res) => {
-    const { id } = req.params;
-    if (req.user.id !== id && req.user.role !== 'teacher') {
-        return res.status(403).json({ error: 'Forbidden: You cannot access another student\'s homework' });
+// DELETE /api/announcements/:id — teacher only
+app.delete('/api/announcements/:id', authenticate, async (req, res) => {
+    if (req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Only the teacher can delete announcements.' });
     }
     try {
-        const homework = await executeQuery(
-            'SELECT * FROM homework_assignments WHERE student_id = ? ORDER BY assigned_at DESC',
-            [id]
-        );
-        res.json(homework.map(mapHomeworkRow));
-    } catch (err) {
-        console.error('Failed to fetch homework:', err);
-        res.status(500).json({ error: 'Failed to fetch homework assignments' });
-    }
-});
-
-// Mark homework as completed
-app.put('/api/students/:id/homework/:assignmentId/complete', authenticate, async (req, res) => {
-    const { id, assignmentId } = req.params;
-    if (req.user.id !== id && req.user.role !== 'teacher') {
-        return res.status(403).json({ error: 'Forbidden: You cannot complete another student\'s homework' });
-    }
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        await executeClientQuery(
-            client,
-            'UPDATE homework_assignments SET completed = true, completed_at = CURRENT_TIMESTAMP WHERE student_id = ? AND id = ?',
-            [id, assignmentId]
-        );
-        await client.query('COMMIT');
+        await executeQuery('DELETE FROM announcements WHERE id = ?', [req.params.id]);
         res.json({ success: true });
     } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Failed to complete homework:', err);
-        res.status(500).json({ error: 'Failed to complete homework assignment' });
-    } finally {
-        client.release();
+        res.status(500).json({ error: 'Failed to delete announcement' });
     }
 });
 
-// 2. PRIVATE COACHING FEEDBACK NOTES
-app.put('/api/teachers/students/:id/coaching-notes', checkIsTeacher, validateBodySchema(COACHING_NOTES_SCHEMA), async (req, res) => {
-    const { id } = req.params;
-    const { notes } = req.body;
-    const client = await pool.connect();
+// ============================================================
+// ACADEMY TOURNAMENTS API
+// ============================================================
+
+// GET /api/tournaments/academy — all academy tournaments with registration count
+app.get('/api/tournaments/academy', async (req, res) => {
     try {
-        await client.query('BEGIN');
-        await executeClientQuery(
-            client,
-            'UPDATE students SET coaching_notes = ? WHERE id = ?',
-            [notes, id]
-        );
-        await logAuditTrail(client, req.user.id, 'UPDATE_COACHING_NOTES', id, 'Updated student coaching notes');
-        await client.query('COMMIT');
-
-        const profile = await getStudentById(id);
-        res.json(profile);
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Failed to update coaching notes:', err);
-        res.status(500).json({ error: 'Failed to update coaching feedback notes' });
-    } finally {
-        client.release();
-    }
-});
-
-// 3. ATTENDANCE MANAGER (MANUAL LOGGING)
-// Add attendance record date
-app.post('/api/teachers/students/:id/attendance', checkIsTeacher, validateBodySchema(ATTENDANCE_LOG_SCHEMA), async (req, res) => {
-    const { id } = req.params;
-    const { date } = req.body;
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        await executeClientQuery(
-            client,
-            'INSERT INTO attendance_history (student_id, date) VALUES (?, ?) ON CONFLICT (student_id, date) DO NOTHING',
-            [id, date]
-        );
-        await logAuditTrail(client, req.user.id, 'ADD_ATTENDANCE', id, `Added attendance record for ${date}`);
-        await client.query('COMMIT');
-
-        const profile = await getStudentById(id);
-        res.json(profile);
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Failed to manually log attendance:', err);
-        res.status(500).json({ error: 'Failed to log manual attendance entry' });
-    } finally {
-        client.release();
-    }
-});
-
-// Delete attendance record date
-app.delete('/api/teachers/students/:id/attendance/:date', checkIsTeacher, async (req, res) => {
-    const { id, date } = req.params;
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        return res.status(400).json({ error: 'Invalid date format (YYYY-MM-DD)' });
-    }
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        await executeClientQuery(
-            client,
-            'DELETE FROM attendance_history WHERE student_id = ? AND date = ?',
-            [id, date]
-        );
-        await logAuditTrail(client, req.user.id, 'DELETE_ATTENDANCE', id, `Deleted attendance record for ${date}`);
-        await client.query('COMMIT');
-
-        const profile = await getStudentById(id);
-        res.json(profile);
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Failed to delete attendance record:', err);
-        res.status(500).json({ error: 'Failed to delete attendance log date' });
-    } finally {
-        client.release();
-    }
-});
-
-// 4. DYNAMIC CLASS SCHEDULES
-// Get schedules
-app.get('/api/schedules', async (req, res) => {
-    try {
-        // Determine if requester is authenticated. Prefer cookie, fall back to Bearer token.
-        // Authenticated users receive full schedules (student list + Zoom link).
-        // Unauthenticated guests receive sanitized schedules — student names and meeting
-        // credentials stripped to prevent public exposure of student PII and Zoom passwords.
-        let isAuthenticated = false;
         let token = req.cookies?.ms_session_v2 || null;
         if (!token) {
             const authHeader = req.headers['authorization'];
-            if (authHeader && authHeader.startsWith('Bearer ')) token = authHeader.substring(7);
-        }
-        if (token && verifySessionToken(token)) {
-            isAuthenticated = true;
-        } else if (req.headers['x-caller-id']) {
-            const caller = await getStudentById(req.headers['x-caller-id']);
-            if (caller) isAuthenticated = true;
+            if (authHeader && authHeader.startsWith('Bearer ')) {
+                token = authHeader.substring(7);
+            }
         }
 
-        const schedules = await executeQuery('SELECT * FROM class_schedules ORDER BY day, time');
-
-        if (isAuthenticated) {
-            return res.json(schedules);
+        let authenticatedUserId = null;
+        if (token) {
+            const decoded = verifySessionToken(token);
+            if (decoded) {
+                authenticatedUserId = decoded.id;
+            }
         }
 
-        // Guest-safe view: omit Zoom credentials but keep enrolled student names
-        const sanitized = schedules.map(s => ({
-            id: s.id,
-            day: s.day,
-            time: s.time,
-            hour: s.hour,
-            minute: s.minute,
-            level: s.level,
-            students: s.students, // Expose enrolled students publically
-            link: null,          // Zoom link hidden until authenticated
+        let query = `
+            SELECT t.*, s.name as creator_name,
+                   (SELECT COUNT(*) FROM tournament_registrations WHERE tournament_id = t.id) as registrations,
+                   0 as is_registered
+            FROM academy_tournaments t
+            JOIN students s ON s.id = t.created_by
+            ORDER BY t.created_at DESC
+        `;
+
+        if (authenticatedUserId) {
+            query = `
+                SELECT t.*, s.name as creator_name,
+                       (SELECT COUNT(*) FROM tournament_registrations WHERE tournament_id = t.id) as registrations,
+                       (SELECT COUNT(*) FROM tournament_registrations WHERE tournament_id = t.id AND student_id = ?) as is_registered
+                FROM academy_tournaments t
+                JOIN students s ON s.id = t.created_by
+                ORDER BY t.created_at DESC
+            `;
+        }
+
+        const params = authenticatedUserId ? [authenticatedUserId] : [];
+        const rows = await executeQuery(query, params);
+
+        const mapped = rows.map(r => ({
+            ...r,
+            isRegistered: parseInt(r.is_registered, 10) > 0
         }));
-        res.json(sanitized);
+
+        res.json(mapped);
     } catch (err) {
-        console.error('Failed to fetch class schedules:', err);
-        res.status(500).json({ error: 'Failed to retrieve class schedules' });
+        console.error('Failed to fetch academy tournaments:', err);
+        res.status(500).json({ error: 'Failed to fetch tournaments' });
     }
 });
 
-// Update schedule details
-app.put('/api/teachers/schedules/:id', checkIsTeacher, validateBodySchema(UPDATE_SCHEDULE_SCHEMA), async (req, res) => {
-    const { id } = req.params;
-    const { day, time, hour, minute, level, students, link } = req.body;
-
-    const client = await pool.connect();
+// POST /api/tournaments/academy — teacher only
+app.post('/api/tournaments/academy', authenticate, async (req, res) => {
+    if (req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Only the teacher can create academy tournaments.' });
+    }
+    const { title, description, start_date } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title is required.' });
     try {
-        await client.query('BEGIN');
-        await executeClientQuery(
-            client,
-            'UPDATE class_schedules SET day = ?, time = ?, hour = ?, minute = ?, level = ?, students = ?, link = ? WHERE id = ?',
-            [day, time, hour, minute, level, students || [], link, id]
+        const rows = await executeQuery(
+            'INSERT INTO academy_tournaments (title, description, start_date, created_by) VALUES (?, ?, ?, ?) RETURNING *',
+            [title.substring(0, 200), (description || '').substring(0, 1000), start_date || null, req.user.id]
         );
-        await logAuditTrail(client, req.user.id, 'UPDATE_SCHEDULE', id, `Updated class schedule for ${day} ${time} (Level: ${level})`);
-        await client.query('COMMIT');
-
-        const updatedSchedules = await executeQuery('SELECT * FROM class_schedules ORDER BY day, time');
-        res.json(updatedSchedules);
+        res.json(rows[0]);
     } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Failed to update class schedule:', err);
-        res.status(500).json({ error: 'Failed to update class schedule' });
-    } finally {
-        client.release();
+        console.error('Failed to create tournament:', err);
+        res.status(500).json({ error: 'Failed to create tournament' });
     }
 });
 
-// 5. ACADEMY ANALYTICS OVERVIEW
-app.get('/api/teachers/analytics', checkIsTeacher, async (req, res) => {
+// POST /api/tournaments/academy/:id/register — student registers
+app.post('/api/tournaments/academy/:id/register', authenticate, async (req, res) => {
+    const tournamentId = parseInt(req.params.id);
     try {
-        // Serve from cache when available — analytics is expensive (5 parallel queries)
-        const cached = cache.get('analytics:overview');
-        if (cached) return res.json(cached);
-
-        const [studentCountRows, avgRatingRows, homeworkCountRows, puzzleSolvedRows, badgeRows] = await Promise.all([
-            executeQuery("SELECT COUNT(*) as count FROM students WHERE role != 'teacher'"),
-            executeQuery("SELECT AVG(points) as avg FROM students WHERE role != 'teacher'"),
-            executeQuery("SELECT COUNT(*) as count FROM homework_assignments WHERE completed = false"),
-            executeQuery("SELECT COUNT(*) as count FROM student_puzzles"),
-            executeQuery(`
-                SELECT badge_id, COUNT(*) as count 
-                FROM student_badges 
-                WHERE student_id IN (SELECT id FROM students WHERE role != 'teacher')
-                GROUP BY badge_id
-            `)
-        ]);
-
-        const totalStudents = parseInt(studentCountRows[0]?.count || 0);
-        const averageRating = Math.round(parseFloat(avgRatingRows[0]?.avg || 0));
-        const activeHomeworkCount = parseInt(homeworkCountRows[0]?.count || 0);
-        const totalPuzzlesSolved = parseInt(puzzleSolvedRows[0]?.count || 0);
-
-        const badgeDistribution = {};
-        badgeRows.forEach(row => {
-            badgeDistribution[row.badge_id] = parseInt(row.count);
-        });
-
-        const payload = {
-            totalStudents,
-            averageRating,
-            activeHomeworkCount,
-            totalPuzzlesSolved,
-            badgeDistribution
-        };
-        cache.set('analytics:overview', payload, CACHE_TTL_ANALYTICS);
-        res.json(payload);
+        await executeQuery(
+            'INSERT INTO tournament_registrations (tournament_id, student_id) VALUES (?, ?) ON CONFLICT DO NOTHING',
+            [tournamentId, req.user.id]
+        );
+        res.json({ success: true });
     } catch (err) {
-        console.error('Failed to fetch analytics:', err);
-        res.status(500).json({ error: 'Failed to load analytics summaries' });
+        console.error('Failed to register for tournament:', err);
+        res.status(500).json({ error: 'Failed to register' });
     }
+});
+
+// DELETE /api/tournaments/academy/:id — teacher only
+app.delete('/api/tournaments/academy/:id', authenticate, async (req, res) => {
+    if (req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Only the teacher can delete tournaments.' });
+    }
+    try {
+        await executeQuery('DELETE FROM academy_tournaments WHERE id = ?', [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete tournament' });
+    }
+});
+
+// PATCH /api/tournaments/academy/:id/status — teacher only (start/complete tournament)
+app.patch('/api/tournaments/academy/:id/status', authenticate, async (req, res) => {
+    if (req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Only the teacher can update tournament status.' });
+    }
+    const { status } = req.body;
+    const validStatuses = ['upcoming', 'ongoing', 'completed'];
+    if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status.' });
+    try {
+        await executeQuery('UPDATE academy_tournaments SET status = ? WHERE id = ?', [status, req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to update tournament status' });
+    }
+});
+
+// GET /api/tournaments/academy/:id/registrations — get registered students
+app.get('/api/tournaments/academy/:id/registrations', authenticate, async (req, res) => {
+    try {
+        const rows = await executeQuery(
+            `SELECT s.id, s.name, s.avatar, s.points, s.category
+             FROM tournament_registrations r
+             JOIN students s ON s.id = r.student_id
+             WHERE r.tournament_id = ?
+             ORDER BY s.points DESC`,
+            [req.params.id]
+        );
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch registrations' });
+    }
+});
+
+// Active live games registry (accessible to WS server and HTTP routes)
+const activeGames = new Map();
+
+// GET /api/games/active — returns all active challenge matches
+app.get('/api/games/active', (req, res) => {
+    res.json(Array.from(activeGames.values()));
+});
+
+// ============================================================
+// CLASS RECORDINGS API
+// ============================================================
+
+// GET /api/schedules/:id/recordings
+app.get('/api/schedules/:id/recordings', async (req, res) => {
+    try {
+        const rows = await executeQuery(
+            'SELECT * FROM class_recordings WHERE schedule_id = ? ORDER BY recorded_at DESC',
+            [req.params.id]
+        );
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch recordings' });
+    }
+});
+
+// POST /api/schedules/:id/recordings — teacher only
+app.post('/api/schedules/:id/recordings', authenticate, async (req, res) => {
+    if (req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Only the teacher can add recordings.' });
+    }
+    const { title, recording_url, recorded_at } = req.body;
+    if (!recording_url) return res.status(400).json({ error: 'Recording URL is required.' });
+    try {
+        const rows = await executeQuery(
+            'INSERT INTO class_recordings (schedule_id, title, recording_url, recorded_at, added_by) VALUES (?, ?, ?, ?, ?) RETURNING *',
+            [req.params.id, title || 'Class Recording', recording_url, recorded_at || new Date().toISOString().split('T')[0], req.user.id]
+        );
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('Failed to add recording:', err);
+        res.status(500).json({ error: 'Failed to add recording' });
+    }
+});
+
+// DELETE /api/schedules/recordings/:id — teacher only
+app.delete('/api/schedules/recordings/:id', authenticate, async (req, res) => {
+    if (req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Only the teacher can delete recordings.' });
+    }
+    try {
+        await executeQuery('DELETE FROM class_recordings WHERE id = ?', [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete recording' });
+    }
+});
+
+// ============================================================
+// TEACHER INFO API (client-side teacher check)
+// ============================================================
+app.get('/api/me/role', authenticate, (req, res) => {
+    res.json({ role: req.user.role, id: req.user.id });
 });
 
 // Catch-all route to serve 1.html for any frontend client-side routes (SPA redirect support)
@@ -2457,17 +2654,374 @@ app.get('/*splat', (req, res) => {
     });
 });
 
+// Schedule points decay to run in the background on startup, and then every 24 hours.
+function schedulePointsDecay() {
+    // Run initially in the background after boot (with a 5 second delay to not block startup)
+    setTimeout(async () => {
+        console.log('Running initial background points decay check...');
+        try {
+            await performMonthlyPointsDecay();
+        } catch (err) {
+            console.error('Error during initial background points decay:', err);
+        }
+    }, 5000);
+
+    // Run every 24 hours
+    setInterval(async () => {
+        console.log('Running scheduled background points decay check...');
+        try {
+            await performMonthlyPointsDecay();
+        } catch (err) {
+            console.error('Error during scheduled background points decay:', err);
+        }
+    }, 24 * 60 * 60 * 1000);
+}
+
+// ============================================================
+// WEBSOCKET CHESS SERVER FOR STUDENT VS STUDENT LIVE PLAY
+// ============================================================
+const { WebSocketServer } = require('ws');
+
+function initWebSocketServer(httpServer) {
+    const wss = new WebSocketServer({ server: httpServer });
+    const clients = new Map();       // userId  -> ws
+    const spectatorRooms = new Map(); // gameId  -> Set<ws>
+
+    wss.on('connection', (ws, req) => {
+        // Authenticate WebSocket connection using the HTTP session cookie at handshake time
+        const cookies = parseCookies(req?.headers?.cookie);
+        const handshakeToken = cookies?.ms_session_v2;
+        const decoded = verifySessionToken(handshakeToken);
+        if (!decoded) {
+            ws.close(4001, 'Unauthorized Handshake');
+            return;
+        }
+
+        let authenticatedUserId = decoded.id;
+
+        // Periodically verify session status in the database (every 5 minutes)
+        const checkInterval = setInterval(async () => {
+            try {
+                if (ws.userId) {
+                    const activeSession = await executeQuery(
+                        'SELECT id FROM refresh_tokens WHERE student_id = ? AND is_revoked = FALSE AND expires_at > NOW() LIMIT 1',
+                        [ws.userId]
+                    );
+                    if (activeSession.length === 0) {
+                        ws.close(4001, 'Session Revoked');
+                        clearInterval(checkInterval);
+                    }
+                }
+            } catch (err) {
+                console.error('Error during WS session verification:', err);
+            }
+        }, 5 * 60 * 1000);
+
+        ws.on('message', async (message) => {
+            try {
+                const data = JSON.parse(message);
+                
+                switch (data.type) {
+                    case 'register':
+                        authenticatedUserId = data.userId;
+                        ws.userId = data.userId;
+                        ws.userName = data.userName;
+                        clients.set(data.userId, ws);
+                        broadcastOnlineUsers();
+                        break;
+                        
+                    case 'get_online_users':
+                        ws.send(JSON.stringify({
+                            type: 'online_users',
+                            users: getOnlineUsersList()
+                        }));
+                        break;
+                        
+                    case 'challenge_invite':
+                        {
+                            const targetWs = clients.get(data.targetUserId);
+                            if (targetWs) {
+                                targetWs.send(JSON.stringify({
+                                    type: 'challenge_invited',
+                                    senderId: ws.userId,
+                                    senderName: ws.userName,
+                                    clockLimit: data.clockLimit
+                                }));
+                            }
+                        }
+                        break;
+                        
+                    case 'challenge_accept':
+                        {
+                            const senderWs = clients.get(data.senderId);
+                            if (senderWs) {
+                                const gameId = `GAME-${Date.now()}`;
+                                const msg = JSON.stringify({
+                                    type: 'challenge_accepted',
+                                    gameId,
+                                    whitePlayerId: data.senderId,
+                                    blackPlayerId: ws.userId,
+                                    whitePlayerName: senderWs.userName,
+                                    blackPlayerName: ws.userName,
+                                    clockLimit: data.clockLimit
+                                });
+                                ws.send(msg);
+                                senderWs.send(msg);
+
+                                // Save the live game in our active registry for spectators
+                                activeGames.set(gameId, {
+                                    gameId,
+                                    whitePlayerId: data.senderId,
+                                    whitePlayerName: senderWs.userName,
+                                    blackPlayerId: ws.userId,
+                                    blackPlayerName: ws.userName,
+                                    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
+                                });
+                            }
+                        }
+                        break;
+
+                    case 'challenge_decline':
+                        {
+                            const senderWs = clients.get(data.senderId);
+                            if (senderWs) {
+                                senderWs.send(JSON.stringify({
+                                    type: 'challenge_declined',
+                                    declinedByName: ws.userName
+                                }));
+                            }
+                        }
+                        break;
+
+                    case 'game_move':
+                        {
+                            const opponentWs = clients.get(data.opponentId);
+                            if (opponentWs) {
+                                opponentWs.send(JSON.stringify({
+                                    type: 'opponent_move',
+                                    gameId: data.gameId,
+                                    move: data.move,
+                                    fen: data.fen
+                                }));
+                            }
+                            // Broadcast to all spectators watching this game
+                            const room = spectatorRooms.get(data.gameId);
+                            if (room && room.size > 0) {
+                                const spectatorPayload = JSON.stringify({
+                                    type: 'spectator_move',
+                                    gameId: data.gameId,
+                                    move: data.move,
+                                    fen: data.fen,
+                                    san: data.san || null
+                                });
+                                for (const specWs of room) {
+                                    try { specWs.send(spectatorPayload); } catch (e) {}
+                                }
+                            }
+
+                            // Keep the latest FEN in the active games list
+                            const activeG = activeGames.get(data.gameId);
+                            if (activeG) {
+                                activeG.fen = data.fen;
+                            }
+                        }
+                        break;
+
+                    case 'game_resign':
+                        {
+                            const opponentWs = clients.get(data.opponentId);
+                            if (opponentWs) {
+                                opponentWs.send(JSON.stringify({
+                                    type: 'opponent_resigned',
+                                    gameId: data.gameId
+                                }));
+                            }
+                            // Notify spectators that game ended
+                            const resignRoom = spectatorRooms.get(data.gameId);
+                            if (resignRoom) {
+                                const payload = JSON.stringify({ type: 'spectator_game_over', gameId: data.gameId, result: `${ws.userName || 'A player'} resigned` });
+                                for (const specWs of resignRoom) { try { specWs.send(payload); } catch (e) {} }
+                            }
+
+                            // Remove game from active games list
+                            activeGames.delete(data.gameId);
+                        }
+                        break;
+
+                    case 'game_draw_offer':
+                        {
+                            const opponentWs = clients.get(data.opponentId);
+                            if (opponentWs) {
+                                opponentWs.send(JSON.stringify({
+                                    type: 'opponent_draw_offered',
+                                    gameId: data.gameId
+                                }));
+                            }
+                        }
+                        break;
+
+                    case 'game_draw_accept':
+                        {
+                            const opponentWs = clients.get(data.opponentId);
+                            if (opponentWs) {
+                                opponentWs.send(JSON.stringify({
+                                    type: 'opponent_draw_accepted',
+                                    gameId: data.gameId
+                                }));
+                            }
+
+                            // Notify spectators that game ended in a draw
+                            const drawRoom = spectatorRooms.get(data.gameId);
+                            if (drawRoom) {
+                                const payload = JSON.stringify({ type: 'spectator_game_over', gameId: data.gameId, result: "Game ended in a draw 🤝" });
+                                for (const specWs of drawRoom) { try { specWs.send(payload); } catch (e) {} }
+                            }
+
+                            // Remove from active games list
+                            activeGames.delete(data.gameId);
+                        }
+                        break;
+
+                    case 'chat_message':
+                        {
+                            const opponentWs = clients.get(data.opponentId);
+                            if (opponentWs) {
+                                opponentWs.send(JSON.stringify({
+                                    type: 'chat',
+                                    gameId: data.gameId,
+                                    senderName: ws.userName,
+                                    text: data.text
+                                }));
+                            }
+                        }
+                        break;
+
+                    case 'spectate_join':
+                        {
+                            const gId = data.gameId;
+                            if (gId) {
+                                if (!spectatorRooms.has(gId)) spectatorRooms.set(gId, new Set());
+                                spectatorRooms.get(gId).add(ws);
+                                ws.spectatingGameId = gId;
+                                // Notify this spectator of the count
+                                const count = spectatorRooms.get(gId).size;
+                                ws.send(JSON.stringify({ type: 'spectator_count', gameId: gId, count }));
+                                // Broadcast updated count to all in room
+                                const countPayload = JSON.stringify({ type: 'spectator_count', gameId: gId, count });
+                                for (const specWs of spectatorRooms.get(gId)) { try { specWs.send(countPayload); } catch (e) {} }
+                            }
+                        }
+                        break;
+
+                    case 'spectate_leave':
+                        {
+                            const gId = data.gameId || ws.spectatingGameId;
+                            if (gId && spectatorRooms.has(gId)) {
+                                spectatorRooms.get(gId).delete(ws);
+                                ws.spectatingGameId = null;
+                                if (spectatorRooms.get(gId).size === 0) spectatorRooms.delete(gId);
+                            }
+                        }
+                        break;
+                }
+            } catch (err) {
+                console.error('WS Error:', err);
+            }
+        });
+
+        ws.on('close', () => {
+            clearInterval(checkInterval);
+            if (authenticatedUserId) {
+                clients.delete(authenticatedUserId);
+                broadcastOnlineUsers();
+
+                // Clean up active games involving this user
+                for (const [gId, game] of activeGames.entries()) {
+                    if (game.whitePlayerId === authenticatedUserId || game.blackPlayerId === authenticatedUserId) {
+                        activeGames.delete(gId);
+                        
+                        // Notify spectators
+                        const room = spectatorRooms.get(gId);
+                        if (room) {
+                            const payload = JSON.stringify({ type: 'spectator_game_over', gameId: gId, result: 'Opponent disconnected' });
+                            for (const specWs of room) { try { specWs.send(payload); } catch (e) {} }
+                        }
+                    }
+                }
+            }
+            // Clean up any spectator room membership
+            if (ws.spectatingGameId && spectatorRooms.has(ws.spectatingGameId)) {
+                spectatorRooms.get(ws.spectatingGameId).delete(ws);
+                if (spectatorRooms.get(ws.spectatingGameId).size === 0) {
+                    spectatorRooms.delete(ws.spectatingGameId);
+                }
+            }
+        });
+
+        function getOnlineUsersList() {
+            const list = [];
+            for (const [uid, clientWs] of clients.entries()) {
+                if (uid !== authenticatedUserId) {
+                    list.push({ id: uid, name: clientWs.userName });
+                }
+            }
+            return list;
+        }
+
+        function broadcastOnlineUsers() {
+            const list = [];
+            for (const [uid, clientWs] of clients.entries()) {
+                list.push({ id: uid, name: clientWs.userName });
+            }
+            const payload = JSON.stringify({
+                type: 'online_users',
+                users: list
+            });
+            for (const clientWs of clients.values()) {
+                try {
+                    clientWs.send(payload);
+                } catch (e) {}
+            }
+        }
+    });
+}
+
 // Boot the server
-initDatabaseConnection().then(() => {
-    setupDatabaseSchema().then(() => {
-        app.listen(PORT, () => {
-            console.log(`Server is running on port ${PORT}`);
+const cluster = require('cluster');
+const os = require('os');
+
+if (process.env.ENABLE_CLUSTER === 'true' && cluster.isPrimary) {
+    const numCPUs = os.cpus().length || 1;
+    console.log(`Primary cluster process ${process.pid} is running. Forking ${numCPUs} workers...`);
+
+    // Fork workers
+    for (let i = 0; i < numCPUs; i++) {
+        cluster.fork();
+    }
+
+    cluster.on('exit', (worker, code, signal) => {
+        console.log(`Worker process ${worker.process.pid} died. Spawning a replacement worker...`);
+        cluster.fork();
+    });
+} else {
+    initDatabaseConnection().then(() => {
+        setupDatabaseSchema().then(() => {
+            const serverInstance = app.listen(PORT, () => {
+                const workerPrefix = cluster.isWorker ? `[Worker ${cluster.worker.id}] ` : '';
+                console.log(`${workerPrefix}Server is running on port ${PORT}`);
+                
+                // Only run background scheduler on worker 1 (or single server mode)
+                if (!cluster.isWorker || cluster.worker.id === 1) {
+                    schedulePointsDecay();
+                }
+            });
+            initWebSocketServer(serverInstance);
+        }).catch(err => {
+            console.error('Schema initialization failed:', err);
+            process.exit(1);
         });
     }).catch(err => {
-        console.error('Schema initialization failed:', err);
+        console.error('PostgreSQL connection failed:', err);
         process.exit(1);
     });
-}).catch(err => {
-    console.error('PostgreSQL connection failed:', err);
-    process.exit(1);
-});
+}

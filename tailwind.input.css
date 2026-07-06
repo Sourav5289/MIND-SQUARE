@@ -49,3 +49,17 @@
   --font-headline-lg-mobile: "Source Serif 4", serif;
   --font-headline-lg: "Source Serif 4", serif;
 }
+
+@keyframes spin3d {
+  from {
+    transform: rotateY(0deg) rotateX(10deg);
+  }
+  to {
+    transform: rotateY(360deg) rotateX(10deg);
+  }
+}
+
+.animate-spin-3d {
+  animation: spin3d 16s linear infinite;
+  transform-style: preserve-3d;
+}

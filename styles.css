@@ -317,106 +317,6 @@
    Teacher Suite: Homework, Attendance, Notes
    ========================================= */
 
-/* Homework list container in teacher modal */
-.hw-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    max-height: 160px;
-    overflow-y: auto;
-    padding: 0.5rem;
-    background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 0.75rem;
-}
-
-/* Individual homework chip */
-.hw-chip {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.5rem 0.75rem;
-    border-radius: 0.5rem;
-    font-size: 0.7rem;
-    font-weight: 600;
-    gap: 0.5rem;
-}
-
-.hw-chip-pending {
-    background: rgba(233, 193, 118, 0.1);
-    border: 1px solid rgba(233, 193, 118, 0.25);
-    color: var(--secondary);
-}
-
-.hw-chip-done {
-    background: rgba(52, 211, 153, 0.08);
-    border: 1px solid rgba(52, 211, 153, 0.2);
-    color: #34d399;
-}
-
-.hw-chip-title {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.hw-chip-status {
-    font-size: 0.625rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    opacity: 0.8;
-    white-space: nowrap;
-}
-
-/* Attendance chips wrapper */
-.attendance-chips-wrap {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    min-height: 2.5rem;
-    padding: 0.5rem;
-    background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 0.75rem;
-    align-items: flex-start;
-    align-content: flex-start;
-    max-height: 120px;
-    overflow-y: auto;
-}
-
-/* Single attendance date chip */
-.attendance-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.3rem 0.65rem;
-    background: rgba(52, 211, 153, 0.1);
-    border: 1px solid rgba(52, 211, 153, 0.25);
-    border-radius: 9999px;
-    font-size: 0.65rem;
-    font-weight: 600;
-    color: #34d399;
-}
-
-/* Delete button inside attendance chip */
-.attendance-chip-del {
-    background: none;
-    border: none;
-    color: #34d399;
-    opacity: 0.7;
-    font-size: 0.85rem;
-    font-weight: 700;
-    cursor: pointer;
-    line-height: 1;
-    padding: 0;
-    transition: opacity 0.15s ease;
-}
-
-.attendance-chip-del:hover {
-    opacity: 1;
-}
 
 /* Coach's Corner glassmorphic card */
 .coach-notes-card {
@@ -602,8 +502,16 @@ header.pl-64 {
 }
 /* Logo styling and dark mode invert */
 #header-logo-img {
-    height: 3rem !important; /* 48px - larger logo size */
+    height: 4.5rem !important; /* 72px - maximum prominence */
+    max-height: 4.5rem;
+    position: relative;
+    top: 4px; /* Hangs slightly below the header border for premium aesthetic */
 }
 .dark #header-logo-img {
     filter: brightness(0) invert(1);
+}
+
+/* Helper class to ensure hidden elements are display: none */
+.hidden {
+    display: none !important;
 }
