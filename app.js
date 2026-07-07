@@ -3773,14 +3773,23 @@ window.recordGameResultWithCelebration = function(result) {
 // WEBSOCKET LIVE CHALLENGE
 // ================================================================
 let _liveWS = null;
+let _liveReconnectTimeout = null;
 let _liveOpponentId = null;
 let _liveGameId = null;
 let _liveMyColor = null;
 let _liveClockLimit = 300;
+window._liveClockLimit = 300;
 
 function initLiveChallenge() {
     const user = getCurrentUser();
     if (!user) return;
+
+    // Clear any pending reconnection timer
+    if (_liveReconnectTimeout) {
+        clearTimeout(_liveReconnectTimeout);
+        _liveReconnectTimeout = null;
+    }
+
     if (_liveWS && _liveWS.readyState === WebSocket.OPEN) {
         // Already connected. Refresh list of online users dynamically.
         try {
@@ -3821,13 +3830,21 @@ function initLiveChallenge() {
         // Update UI to reflect disconnected status
         const container = document.getElementById('live-challenge-users');
         if (container) {
-            container.innerHTML = `<span class="text-xs text-red-400 font-semibold flex items-center gap-1"><span class="material-symbols-outlined text-sm">link_off</span> Disconnected. Click Connect to retry.</span>`;
+            container.innerHTML = `<span class="text-xs text-red-400 font-semibold flex items-center gap-1"><span class="material-symbols-outlined text-sm">link_off</span> Disconnected. Reconnecting...</span>`;
         }
         
         const connBtn = document.querySelector('[data-action="initLiveChallenge"]');
         if (connBtn) {
-            connBtn.innerText = 'Connect';
-            connBtn.className = "text-[10px] px-2 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg hover:bg-emerald-500/30 transition-all font-bold";
+            connBtn.innerText = 'Connecting...';
+            connBtn.className = "text-[10px] px-2 py-1 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg transition-all font-bold cursor-default animate-pulse";
+        }
+
+        // Auto-reconnect after 3 seconds if the user remains logged in
+        if (getCurrentUser()) {
+            _liveReconnectTimeout = setTimeout(() => {
+                console.log("Attempting to reconnect live challenge WebSocket...");
+                initLiveChallenge();
+            }, 3000);
         }
     };
 }
@@ -4011,9 +4028,25 @@ function startLiveGame(msg) {
     navigateTo('chess');
 
     setTimeout(() => {
+        if (typeof selectedClockLimit !== 'undefined') {
+            selectedClockLimit = _liveClockLimit;
+        }
         if (typeof initChessGame === 'function') initChessGame();
+        
         window._liveMode = true;
         window._liveMyColor = _liveMyColor;
+
+        // Flip board if player is playing as Black
+        if (typeof boardFlipped !== 'undefined') {
+            boardFlipped = (_liveMyColor === 'b');
+            if (typeof renderBoard2D === 'function') renderBoard2D();
+        }
+
+        // Start the clock!
+        if (typeof startChessClock === 'function' && _liveClockLimit > 0) {
+            activeClockPlayer = 'w';
+            startChessClock();
+        }
     }, 400);
 }
 
@@ -4028,16 +4061,46 @@ function sendLiveMove(move, fen) {
         san: move
     }));
 }
+window.sendLiveMove = sendLiveMove;
 
 function applyOpponentMove(move, fen) {
     if (typeof chessGame !== 'undefined' && move) {
         try {
-            chessGame.move(move);
-            if (typeof renderBoard2D === 'function') renderBoard2D();
-            if (typeof playMoveSoundForMove === 'function') playMoveSoundForMove(move, chessGame);
-        } catch (e) {}
+            const parsedMove = chessGame.move(move);
+            if (parsedMove) {
+                if (typeof playMoveSoundForMove === 'function') {
+                    playMoveSoundForMove(parsedMove, chessGame);
+                }
+                
+                // Render opponent's move on active board view (2D or 3D)
+                if (typeof gameMode !== 'undefined' && gameMode === '3D' && typeof updateBoard3D === 'function') {
+                    updateBoard3D();
+                } else if (typeof renderBoard2D === 'function') {
+                    renderBoard2D();
+                }
+
+                // Update game turn status text
+                const statusEl = document.getElementById('chess-status');
+                if (statusEl) {
+                    statusEl.innerText = `Opponent played: ${parsedMove.san}. Your turn!`;
+                }
+
+                // Verify checkmate, draw or game-over status
+                if (typeof checkGameStatus === 'function') {
+                    checkGameStatus();
+                }
+
+                // Switch clock turn
+                if (typeof switchClockTurn === 'function') {
+                    switchClockTurn();
+                }
+            }
+        } catch (e) {
+            console.error('Error applying opponent move:', e);
+        }
     }
 }
+window.applyOpponentMove = applyOpponentMove;
 
 function showDrawOffer() {
     showNotification('Opponent offers a draw. Check the live game panel to respond.', 'info');

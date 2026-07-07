@@ -198,7 +198,7 @@ function handleSquareClick2D(square) {
             renderBoard2D();
 
             // Handle turn controls based on game mode
-            if (!chessGame.game_over() && arenaGameMode === 'vs-computer') {
+            if (!chessGame.game_over() && arenaGameMode === 'vs-computer' && !window._liveMode) {
                 document.getElementById('chess-status').innerText = 'Mind Square AI is thinking...';
                 setTimeout(makeAIMove, 700);
             } else if (!chessGame.game_over() && arenaGameMode === 'pass-play') {
@@ -284,8 +284,8 @@ function makePlayerMove(from, to) {
             updatePlayerMoveStreak(classification);
 
             // If in WS Live mode, transmit move to opponent
-            if (window._liveMode && typeof sendLiveMove === 'function') {
-                sendLiveMove(move.san, chessGame.fen());
+            if (window._liveMode && typeof window.sendLiveMove === 'function') {
+                window.sendLiveMove(move.san, chessGame.fen());
             }
 
             checkGameStatus();
@@ -1155,7 +1155,7 @@ function handleSquareClick3D(square) {
             updateBoard3D();
 
             // AI or local opponent turn
-            if (!chessGame.game_over() && arenaGameMode === 'vs-computer') {
+            if (!chessGame.game_over() && arenaGameMode === 'vs-computer' && !window._liveMode) {
                 document.getElementById('chess-status').innerText = 'Mind Square AI is thinking...';
                 setTimeout(makeAIMove, 700);
             } else if (!chessGame.game_over() && arenaGameMode === 'pass-play') {
