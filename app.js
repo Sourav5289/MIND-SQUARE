@@ -578,7 +578,7 @@ function saveStudents(students) {
     renderLeaderboard();
 }
 
-const ADMIN_EMAIL = 'mindsquarechessclass@gmail.com';
+const ADMIN_EMAIL = 's41026143@gmail.com';
 
 function applyAdminOverrides(user) {
     if (!user || !user.email || user.email.toLowerCase() !== ADMIN_EMAIL) return user;

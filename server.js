@@ -1637,7 +1637,7 @@ async function getStudentsDetailedList({ limit = 100, offset = 0, search = '' } 
 
     const rows = await executeQuery(query, params);
     // Exclude the academy owner account from the public leaderboard
-    const ADMIN_EMAIL = 'mindsquarechessclass@gmail.com';
+    const ADMIN_EMAIL = 's41026143@gmail.com';
     const result = rows.map(mapStudentRow).filter(s => s.email?.toLowerCase() !== ADMIN_EMAIL);
 
     if (isDefaultLeaderboard) {
