@@ -259,6 +259,15 @@
                 });
             }
 
+            const liveChallengeSearch = document.getElementById('live-challenge-search-input');
+            if (liveChallengeSearch) {
+                liveChallengeSearch.addEventListener('input', (e) => {
+                    if (typeof window.renderOnlineUsers === 'function' && typeof window._lastOnlineUsersList !== 'undefined') {
+                        window.renderOnlineUsers(window._lastOnlineUsersList);
+                    }
+                });
+            }
+
             const endgameSelect = document.getElementById('endgame-scenario-select');
             if (endgameSelect) {
                 endgameSelect.addEventListener('change', (e) => {

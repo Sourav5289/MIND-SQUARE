@@ -3775,6 +3775,7 @@ window.recordGameResultWithCelebration = function(result) {
 // ================================================================
 let _liveWS = null;
 let _liveReconnectTimeout = null;
+window._lastOnlineUsersList = [];
 let _liveOpponentId = null;
 let _liveGameId = null;
 let _liveMyColor = null;
@@ -3807,6 +3808,10 @@ function initLiveChallenge() {
     _liveWS.onopen = () => {
         _liveWS.send(JSON.stringify({ type: 'register', userId: user.id, userName: user.name }));
         
+        // Show live challenge search bar
+        const searchContainer = document.getElementById('live-challenge-search-container');
+        if (searchContainer) searchContainer.classList.remove('hidden');
+
         // Update the Connect button state to "Connected"
         const connBtn = document.querySelector('[data-action="initLiveChallenge"]');
         if (connBtn) {
@@ -3828,6 +3833,10 @@ function initLiveChallenge() {
         console.warn("Live challenge WebSocket closed. Code:", event.code, "Reason:", event.reason);
         _liveWS = null;
         
+        // Hide live challenge search bar
+        const searchContainer = document.getElementById('live-challenge-search-container');
+        if (searchContainer) searchContainer.classList.add('hidden');
+
         // Update UI to reflect disconnected status
         const container = document.getElementById('live-challenge-users');
         if (container) {
@@ -3854,6 +3863,7 @@ window.initLiveChallenge = initLiveChallenge;
 function handleLiveWSMessage(msg) {
     switch (msg.type) {
         case 'online_users':
+            window._lastOnlineUsersList = msg.users;
             renderOnlineUsers(msg.users);
             break;
         case 'challenge_invited':
@@ -3940,10 +3950,17 @@ function renderOnlineUsers(users) {
     
     // Filter out the current user to prevent challenging yourself
     const currentUser = getCurrentUser();
-    const otherUsers = users.filter(u => u.id !== currentUser?.id);
+    let otherUsers = users.filter(u => u.id !== currentUser?.id);
+
+    // Apply search filter if query is present
+    const searchInput = document.getElementById('live-challenge-search-input');
+    const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    if (query) {
+        otherUsers = otherUsers.filter(u => u.name.toLowerCase().includes(query));
+    }
 
     if (!otherUsers.length) {
-        container.innerHTML = `<span class="text-xs text-on-surface-variant italic">No other students online right now.</span>`;
+        container.innerHTML = `<span class="text-xs text-on-surface-variant italic">${query ? 'No matching online students.' : 'No other students online right now.'}</span>`;
         return;
     }
     container.innerHTML = otherUsers.map(u => `
@@ -3959,6 +3976,7 @@ function renderOnlineUsers(users) {
         </div>
     `).join('');
 }
+window.renderOnlineUsers = renderOnlineUsers;
 
 function sendChallengeInvite(targetUserId, targetUserName, clockLimit) {
     if (!_liveWS) { showNotification('Not connected. Refresh the page.', 'error'); return; }
