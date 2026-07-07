@@ -1402,6 +1402,7 @@ function navigateTo(tabId, keepViewingUser = false) {
     // Scroll to top
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+window.navigateTo = navigateTo;
 
 // Calculate ELO progression details
 function getEloProgress(points, role) {
@@ -3937,39 +3938,39 @@ window.setLiveClockLimit = setLiveClockLimit;
 
 function showChallengeInvite(msg) {
     const user = getCurrentUser();
+    
+    // Hide legacy dashboard banner completely since we now use the centered modal
     const banner = document.getElementById('live-challenge-invite-banner');
     if (banner) {
-        banner.classList.remove('hidden');
-        banner.innerHTML = `
-            <div class="flex items-center gap-2 justify-between flex-wrap">
-                <span class="text-sm font-bold text-on-surface">⚔️ <strong>${escapeHTML(msg.senderName)}</strong> challenged you!</span>
-                <div class="flex gap-2">
-                    <button data-action="acceptChallenge" data-sender-id="${msg.senderId}" data-clock-limit="${msg.clockLimit}" class="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-bold hover:bg-emerald-600">Accept</button>
-                    <button data-action="declineChallenge" data-sender-id="${msg.senderId}" class="px-3 py-1.5 bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-xs font-bold hover:bg-red-500/30">Decline</button>
-                </div>
-            </div>
-        `;
+        banner.classList.add('hidden');
     }
 
-    // Floating global challenge invite toast at bottom-right of screen
+    // Centered modal backdrop & box
     const toastId = 'live-challenge-toast-' + msg.senderId;
     let toast = document.getElementById(toastId);
     if (!toast) {
         toast = document.createElement('div');
         toast.id = toastId;
-        toast.className = 'fixed bottom-4 right-4 z-[9999] max-w-sm w-full p-4 rounded-xl shadow-2xl glass-card border border-outline-variant bg-surface/90 text-on-surface animate-bounce';
+        toast.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4';
         document.body.appendChild(toast);
     }
     toast.innerHTML = `
-        <div class="flex flex-col gap-3">
-            <div class="flex items-center gap-2">
-                <span class="material-symbols-outlined text-secondary">swords</span>
-                <span class="text-sm font-bold">Live Challenge Invite!</span>
+        <div class="max-w-md w-full p-6 rounded-2xl shadow-2xl border border-outline-variant/30 bg-surface/95 text-on-surface flex flex-col gap-4" style="backdrop-filter: blur(20px); animation: zoomIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);">
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-full bg-secondary/20 flex items-center justify-center text-secondary text-2xl animate-pulse">
+                    <span class="material-symbols-outlined text-2xl">swords</span>
+                </div>
+                <div>
+                    <h3 class="font-display-lg text-lg font-bold">Live Challenge Invite!</h3>
+                    <p class="text-[10px] text-on-surface-variant uppercase tracking-wider">Real-time PvP Chess</p>
+                </div>
             </div>
-            <p class="text-xs text-on-surface-variant"><strong>${escapeHTML(msg.senderName)}</strong> has challenged you to a live match!</p>
-            <div class="flex justify-end gap-2 mt-1">
-                <button onclick="declineChallenge('${msg.senderId}'); document.getElementById('${toastId}')?.remove();" class="px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg text-xs font-bold hover:bg-red-500/20 transition-all cursor-pointer">Decline</button>
-                <button onclick="acceptChallenge('${msg.senderId}', ${msg.clockLimit}); document.getElementById('${toastId}')?.remove();" class="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition-all cursor-pointer">Accept</button>
+            <p class="text-sm text-on-surface leading-relaxed">
+                <strong>${escapeHTML(msg.senderName)}</strong> has challenged you to a live match (${msg.clockLimit / 60} min time control)!
+            </p>
+            <div class="flex justify-end gap-3 mt-2">
+                <button onclick="declineChallenge('${msg.senderId}'); document.getElementById('${toastId}')?.remove();" class="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl text-xs font-bold hover:bg-red-500/20 transition-all cursor-pointer">Decline</button>
+                <button onclick="acceptChallenge('${msg.senderId}', ${msg.clockLimit}); document.getElementById('${toastId}')?.remove();" class="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all cursor-pointer">Accept Challenge</button>
             </div>
         </div>
     `;
