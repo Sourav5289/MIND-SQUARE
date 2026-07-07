@@ -3780,13 +3780,28 @@ let _liveClockLimit = 300;
 function initLiveChallenge() {
     const user = getCurrentUser();
     if (!user) return;
-    if (_liveWS && _liveWS.readyState === WebSocket.OPEN) return;
+    if (_liveWS && _liveWS.readyState === WebSocket.OPEN) {
+        // Already connected. Refresh list of online users dynamically.
+        try {
+            _liveWS.send(JSON.stringify({ type: 'get_online_users' }));
+            showNotification("Refreshed online students.", "success");
+        } catch (e) {}
+        return;
+    }
 
-    const wsUrl = `ws://${window.location.host}`;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
     _liveWS = new WebSocket(wsUrl);
 
     _liveWS.onopen = () => {
         _liveWS.send(JSON.stringify({ type: 'register', userId: user.id, userName: user.name }));
+        
+        // Update the Connect button state to "Connected"
+        const connBtn = document.querySelector('[data-action="initLiveChallenge"]');
+        if (connBtn) {
+            connBtn.innerText = 'Connected';
+            connBtn.className = "text-[10px] px-2 py-1 bg-emerald-600 text-white rounded-lg transition-all font-bold cursor-default";
+        }
     };
 
     _liveWS.onmessage = (event) => {
@@ -3794,8 +3809,25 @@ function initLiveChallenge() {
         handleLiveWSMessage(msg);
     };
 
-    _liveWS.onclose = () => {
+    _liveWS.onerror = (err) => {
+        console.error("Live challenge WebSocket error:", err);
+    };
+
+    _liveWS.onclose = (event) => {
+        console.warn("Live challenge WebSocket closed. Code:", event.code, "Reason:", event.reason);
         _liveWS = null;
+        
+        // Update UI to reflect disconnected status
+        const container = document.getElementById('live-challenge-users');
+        if (container) {
+            container.innerHTML = `<span class="text-xs text-red-400 font-semibold flex items-center gap-1"><span class="material-symbols-outlined text-sm">link_off</span> Disconnected. Click Connect to retry.</span>`;
+        }
+        
+        const connBtn = document.querySelector('[data-action="initLiveChallenge"]');
+        if (connBtn) {
+            connBtn.innerText = 'Connect';
+            connBtn.className = "text-[10px] px-2 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg hover:bg-emerald-500/30 transition-all font-bold";
+        }
     };
 }
 window.initLiveChallenge = initLiveChallenge;
@@ -3856,11 +3888,16 @@ function handleLiveWSMessage(msg) {
 function renderOnlineUsers(users) {
     const container = document.getElementById('live-challenge-users');
     if (!container) return;
-    if (!users.length) {
+    
+    // Filter out the current user to prevent challenging yourself
+    const currentUser = getCurrentUser();
+    const otherUsers = users.filter(u => u.id !== currentUser?.id);
+
+    if (!otherUsers.length) {
         container.innerHTML = `<span class="text-xs text-on-surface-variant italic">No other students online right now.</span>`;
         return;
     }
-    container.innerHTML = users.map(u => `
+    container.innerHTML = otherUsers.map(u => `
         <div class="flex items-center justify-between p-2 rounded-xl bg-surface-container-high border border-outline-variant/25 gap-2">
             <div class="flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -3876,10 +3913,27 @@ function renderOnlineUsers(users) {
 
 function sendChallengeInvite(targetUserId, targetUserName, clockLimit) {
     if (!_liveWS) { showNotification('Not connected. Refresh the page.', 'error'); return; }
-    _liveWS.send(JSON.stringify({ type: 'challenge_invite', targetUserId, clockLimit: clockLimit || 300 }));
+    _liveWS.send(JSON.stringify({ type: 'challenge_invite', targetUserId, clockLimit: clockLimit || _liveClockLimit }));
     showNotification(`Challenge sent to ${targetUserName}!`, 'success');
 }
 window.sendChallengeInvite = sendChallengeInvite;
+
+function setLiveClockLimit(limit) {
+    _liveClockLimit = limit;
+    window._liveClockLimit = limit; // Keep both in sync for external handlers
+    
+    // Update the visual styling of all clock preset buttons in the Live Challenge widget
+    const buttons = document.querySelectorAll('[data-action="setLiveClockLimit"]');
+    buttons.forEach(btn => {
+        const arg = parseInt(btn.getAttribute('data-arg'), 10);
+        if (arg === limit) {
+            btn.className = "px-2 py-1 rounded-lg text-[10px] bg-secondary/20 border border-secondary/40 text-secondary font-bold transition-all";
+        } else {
+            btn.className = "px-2 py-1 rounded-lg text-[10px] bg-surface-container-high border border-outline-variant text-on-surface hover:border-secondary transition-all";
+        }
+    });
+}
+window.setLiveClockLimit = setLiveClockLimit;
 
 function showChallengeInvite(msg) {
     const user = getCurrentUser();

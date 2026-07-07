@@ -526,7 +526,12 @@ function executeGlobalAction(action, arg, target, event) {
             }
             break;
         case 'setLiveClockLimit':
-            window._liveClockLimit = parseInt(arg, 10);
+            const limit = parseInt(arg, 10);
+            if (typeof window.setLiveClockLimit === 'function') {
+                window.setLiveClockLimit(limit);
+            } else {
+                window._liveClockLimit = limit;
+            }
             break;
         case 'selectModalFormat':
             if (typeof window.selectModalFormat === 'function') window.selectModalFormat(arg);
