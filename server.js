@@ -2634,8 +2634,29 @@ app.delete('/api/schedules/recordings/:id', authenticate, async (req, res) => {
 // ============================================================
 // TEACHER INFO API (client-side teacher check)
 // ============================================================
-app.get('/api/me/role', authenticate, (req, res) => {
-    res.json({ role: req.user.role, id: req.user.id });
+app.get('/api/me/role', authenticate, async (req, res) => {
+    try {
+        const student = await getStudentById(req.user.id);
+        if (student) {
+            // If the database role changed (e.g. became teacher via config update),
+            // auto-upgrade the user's session token cookie transparently without requiring logout.
+            if (student.role !== req.user.role) {
+                const newAccessToken = generateSessionToken(student.id, student.role);
+                const isProd = process.env.COOKIE_SECURE === 'true';
+                res.cookie('ms_session_v2', newAccessToken, {
+                    httpOnly: true,
+                    sameSite: 'Strict',
+                    secure: isProd,
+                    path: '/',
+                    maxAge: 15 * 60 * 1000 // 15 mins
+                });
+            }
+            return res.json({ role: student.role, id: student.id });
+        }
+        res.json({ role: req.user.role, id: req.user.id });
+    } catch (e) {
+        res.json({ role: req.user.role, id: req.user.id });
+    }
 });
 
 // Catch-all route to serve 1.html for any frontend client-side routes (SPA redirect support)
