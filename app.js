@@ -3969,8 +3969,8 @@ function showChallengeInvite(msg) {
                 <strong>${escapeHTML(msg.senderName)}</strong> has challenged you to a live match (${msg.clockLimit / 60} min time control)!
             </p>
             <div class="flex justify-end gap-3 mt-2">
-                <button onclick="declineChallenge('${msg.senderId}'); document.getElementById('${toastId}')?.remove();" class="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl text-xs font-bold hover:bg-red-500/20 transition-all cursor-pointer">Decline</button>
-                <button onclick="acceptChallenge('${msg.senderId}', ${msg.clockLimit}); document.getElementById('${toastId}')?.remove();" class="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all cursor-pointer">Accept Challenge</button>
+                <button data-action="declineChallenge" data-sender-id="${msg.senderId}" class="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl text-xs font-bold hover:bg-red-500/20 transition-all cursor-pointer">Decline</button>
+                <button data-action="acceptChallenge" data-sender-id="${msg.senderId}" data-clock-limit="${msg.clockLimit}" class="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all cursor-pointer">Accept Challenge</button>
             </div>
         </div>
     `;
@@ -3981,6 +3981,10 @@ function acceptChallenge(senderId, clockLimit) {
     _liveWS.send(JSON.stringify({ type: 'challenge_accept', senderId, clockLimit }));
     const banner = document.getElementById('live-challenge-invite-banner');
     if (banner) banner.classList.add('hidden');
+    // Remove the centered challenge invite modal
+    const toastId = 'live-challenge-toast-' + senderId;
+    const toast = document.getElementById(toastId);
+    if (toast) toast.remove();
 }
 window.acceptChallenge = acceptChallenge;
 
@@ -3989,6 +3993,10 @@ function declineChallenge(senderId) {
     _liveWS.send(JSON.stringify({ type: 'challenge_decline', senderId }));
     const banner = document.getElementById('live-challenge-invite-banner');
     if (banner) banner.classList.add('hidden');
+    // Remove the centered challenge invite modal
+    const toastId = 'live-challenge-toast-' + senderId;
+    const toast = document.getElementById(toastId);
+    if (toast) toast.remove();
 }
 window.declineChallenge = declineChallenge;
 
