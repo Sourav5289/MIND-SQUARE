@@ -847,6 +847,7 @@ function recordGameResult(result) {
         syncUserStatsToServer(student);
     }
 }
+window.recordGameResult = recordGameResult;
 
 function getClassDetails(category) {
     switch (category) {
@@ -3875,6 +3876,36 @@ function handleLiveWSMessage(msg) {
         case 'opponent_resigned':
             showNotification('Opponent resigned! You win! 🎉', 'success');
             launchConfetti();
+            
+            // Record victory points
+            if (typeof window.recordGameResult === 'function') {
+                window.recordGameResult('win');
+            }
+            
+            // Close active game states
+            window._liveMode = false;
+            const chatWrapperResign = document.getElementById('live-chat-wrapper');
+            if (chatWrapperResign) chatWrapperResign.classList.add('hidden');
+            
+            const statusElResign = document.getElementById('chess-status');
+            if (statusElResign) statusElResign.innerText = "Game over. Opponent resigned.";
+            
+            if (typeof stopChessClock === 'function') {
+                stopChessClock();
+            }
+            break;
+        case 'game_resume':
+            resumeLiveGame(msg);
+            break;
+        case 'opponent_disconnected':
+            showNotification(`Opponent went offline! Waiting ${msg.graceSeconds}s for them to return...`, 'warning');
+            break;
+        case 'opponent_reconnected':
+            showNotification('Opponent reconnected!', 'success');
+            break;
+        case 'opponent_disconnected_timeout':
+            showNotification('Opponent failed to reconnect in time. Game ended.', 'info');
+            window._liveMode = false;
             break;
         case 'opponent_draw_offered':
             showDrawOffer();
@@ -4049,6 +4080,84 @@ function startLiveGame(msg) {
         }
     }, 400);
 }
+
+function resumeLiveGame(msg) {
+    const user = getCurrentUser();
+    _liveGameId = msg.gameId;
+    _liveMyColor = msg.whitePlayerId === user.id ? 'w' : 'b';
+    _liveOpponentId = _liveMyColor === 'w' ? msg.blackPlayerId : msg.whitePlayerId;
+    _liveClockLimit = msg.clockLimit || 300;
+
+    showNotification(`Resuming live match...`, 'info');
+    navigateTo('chess');
+
+    setTimeout(() => {
+        if (typeof selectedClockLimit !== 'undefined') {
+            selectedClockLimit = _liveClockLimit;
+        }
+        
+        // Pass the FEN string to rebuild the board layout
+        if (typeof initChessGame === 'function') initChessGame(msg.fen);
+        
+        window._liveMode = true;
+        window._liveMyColor = _liveMyColor;
+
+        // Flip board if player is playing as Black
+        if (typeof boardFlipped !== 'undefined') {
+            boardFlipped = (_liveMyColor === 'b');
+            if (typeof renderBoard2D === 'function') renderBoard2D();
+        }
+
+        // Resync current active turn status
+        if (typeof chessGame !== 'undefined') {
+            const currentTurn = chessGame.turn();
+            const statusEl = document.getElementById('chess-status');
+            if (statusEl) {
+                statusEl.innerText = currentTurn === _liveMyColor ? "Your turn! Choose a move." : "Opponent is thinking...";
+            }
+
+            // Start clock for the player whose turn it currently is
+            if (typeof startChessClock === 'function' && _liveClockLimit > 0) {
+                activeClockPlayer = currentTurn;
+                startChessClock();
+            }
+        }
+    }, 400);
+}
+
+function resignLiveGame() {
+    if (!window._liveMode || !_liveWS || !_liveGameId || !_liveOpponentId) return;
+    
+    if (confirm("Are you sure you want to resign the game? This will count as a loss.")) {
+        _liveWS.send(JSON.stringify({
+            type: 'game_resign',
+            gameId: _liveGameId,
+            opponentId: _liveOpponentId
+        }));
+
+        // Record defeat points
+        if (typeof window.recordGameResult === 'function') {
+            window.recordGameResult('lose');
+        }
+
+        window._liveMode = false;
+        showNotification("You resigned the game.", "info");
+
+        // Hide active game chat and controls
+        const chatWrapper = document.getElementById('live-chat-wrapper');
+        if (chatWrapper) chatWrapper.classList.add('hidden');
+
+        const statusEl = document.getElementById('chess-status');
+        if (statusEl) {
+            statusEl.innerText = "Game over. You resigned.";
+        }
+        
+        if (typeof stopChessClock === 'function') {
+            stopChessClock();
+        }
+    }
+}
+window.resignLiveGame = resignLiveGame;
 
 function sendLiveMove(move, fen) {
     if (!_liveWS || !_liveOpponentId || !window._liveMode) return;

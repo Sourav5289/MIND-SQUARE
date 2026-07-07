@@ -2746,6 +2746,34 @@ function initWebSocketServer(httpServer) {
                         ws.userName = data.userName;
                         clients.set(data.userId, ws);
                         broadcastOnlineUsers();
+                        
+                        // Check if this registering user has any ongoing live games in our registry
+                        for (const [gId, game] of activeGames.entries()) {
+                            if (game.whitePlayerId === data.userId || game.blackPlayerId === data.userId) {
+                                // Resume game for the reconnected player
+                                ws.send(JSON.stringify({
+                                    type: 'game_resume',
+                                    gameId: game.gameId,
+                                    whitePlayerId: game.whitePlayerId,
+                                    blackPlayerId: game.blackPlayerId,
+                                    whitePlayerName: game.whitePlayerName,
+                                    blackPlayerName: game.blackPlayerName,
+                                    fen: game.fen,
+                                    clockLimit: game.clockLimit
+                                }));
+                                
+                                // Notify opponent of reconnection
+                                const opponentId = game.whitePlayerId === data.userId ? game.blackPlayerId : game.whitePlayerId;
+                                const opponentWs = clients.get(opponentId);
+                                if (opponentWs) {
+                                    opponentWs.send(JSON.stringify({
+                                        type: 'opponent_reconnected',
+                                        gameId: game.gameId
+                                    }));
+                                }
+                                break;
+                            }
+                        }
                         break;
                         
                     case 'get_online_users':
@@ -2953,17 +2981,40 @@ function initWebSocketServer(httpServer) {
                 clients.delete(authenticatedUserId);
                 broadcastOnlineUsers();
 
-                // Clean up active games involving this user
+                // Clean up active games involving this user after a 45-second grace period
                 for (const [gId, game] of activeGames.entries()) {
                     if (game.whitePlayerId === authenticatedUserId || game.blackPlayerId === authenticatedUserId) {
-                        activeGames.delete(gId);
-                        
-                        // Notify spectators
-                        const room = spectatorRooms.get(gId);
-                        if (room) {
-                            const payload = JSON.stringify({ type: 'spectator_game_over', gameId: gId, result: 'Opponent disconnected' });
-                            for (const specWs of room) { try { specWs.send(payload); } catch (e) {} }
+                        // Notify opponent immediately that their rival went offline and has a 45s grace period to return
+                        const immediateOpponentId = game.whitePlayerId === authenticatedUserId ? game.blackPlayerId : game.whitePlayerId;
+                        const immediateOpponentWs = clients.get(immediateOpponentId);
+                        if (immediateOpponentWs) {
+                            immediateOpponentWs.send(JSON.stringify({
+                                type: 'opponent_disconnected',
+                                gameId: gId,
+                                graceSeconds: 45
+                            }));
                         }
+
+                        setTimeout(() => {
+                            // Verify if the user is still offline before deleting
+                            if (!clients.has(authenticatedUserId)) {
+                                activeGames.delete(gId);
+                                
+                                // Notify opponent of disconnection timeout
+                                const opponentId = game.whitePlayerId === authenticatedUserId ? game.blackPlayerId : game.whitePlayerId;
+                                const opponentWs = clients.get(opponentId);
+                                if (opponentWs) {
+                                    opponentWs.send(JSON.stringify({ type: 'opponent_disconnected_timeout', gameId: gId }));
+                                }
+
+                                // Notify spectators
+                                const room = spectatorRooms.get(gId);
+                                if (room) {
+                                    const payload = JSON.stringify({ type: 'spectator_game_over', gameId: gId, result: 'Opponent disconnected' });
+                                    for (const specWs of room) { try { specWs.send(payload); } catch (e) {} }
+                                }
+                            }
+                        }, 45000);
                     }
                 }
             }

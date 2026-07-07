@@ -541,6 +541,11 @@ function executeGlobalAction(action, arg, target, event) {
             if (typeof window.sendLiveChatMessage === 'function') window.sendLiveChatMessage();
             else if (typeof sendLiveChatMessage === 'function') sendLiveChatMessage();
             break;
+        case 'resignLiveGame':
+            if (typeof window.resignLiveGame === 'function') {
+                window.resignLiveGame();
+            }
+            break;
         case 'startCustomRepertoireMode':
             if (typeof window.startCustomRepertoireMode === 'function') window.startCustomRepertoireMode();
             else if (typeof startCustomRepertoireMode === 'function') startCustomRepertoireMode();

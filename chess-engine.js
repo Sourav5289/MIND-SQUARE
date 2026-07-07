@@ -34,10 +34,13 @@ const SVG_PIECES = {
 };
 
 // Initialize Chessboard and logic
-function initChessGame() {
-    chessGame = new Chess();
+function initChessGame(fen = null) {
+    chessGame = fen ? new Chess(fen) : new Chess();
     selectedSquare2D = null;
-    document.getElementById('chess-status').innerText = 'Your turn (White). Choose a move!';
+    
+    // Status text based on current turn if FEN was loaded
+    const startingTurn = chessGame.turn() === 'w' ? 'White' : 'Black';
+    document.getElementById('chess-status').innerText = fen ? `Game resumed. Turn: ${startingTurn}` : 'Your turn (White). Choose a move!';
     document.getElementById('chess-status-badge').innerText = 'In Progress';
     document.getElementById('chess-status-badge').className = 'px-3 py-1 bg-amber-500/20 text-secondary border border-secondary/30 rounded-full font-bold text-xs';
 
@@ -680,16 +683,21 @@ function checkGameStatus() {
         let outcome = 'draw';
 
         if (chessGame.in_checkmate()) {
-            if (chessGame.turn() === 'b') {
+            const loserColor = chessGame.turn();
+            const myColor = window._liveMode ? window._liveMyColor : 'w';
+            
+            if (myColor === loserColor) {
+                // I lost
+                statusText += window._liveMode ? 'Checkmate! You lose.' : 'Checkmate! AI wins.';
+                statusBadge.innerText = 'Defeat';
+                statusBadge.className = 'px-3 py-1 bg-red-500/20 text-red-400 border border-red-500/30 rounded-full font-bold text-xs';
+                outcome = 'lose';
+            } else {
+                // I won
                 statusText += 'Checkmate! You win!';
                 statusBadge.innerText = 'Victory';
                 statusBadge.className = 'px-3 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full font-bold text-xs';
                 outcome = 'win';
-            } else {
-                statusText += 'Checkmate! AI wins.';
-                statusBadge.innerText = 'Defeat';
-                statusBadge.className = 'px-3 py-1 bg-red-500/20 text-red-400 border border-red-500/30 rounded-full font-bold text-xs';
-                outcome = 'lose';
             }
         } else if (chessGame.in_draw() || chessGame.in_stalemate() || chessGame.in_threefold_repetition()) {
             statusText += 'Draw match.';
@@ -701,7 +709,16 @@ function checkGameStatus() {
         document.getElementById('chess-status').innerText = statusText;
 
         // Update user metrics in db
-        recordGameResult(outcome);
+        if (typeof window.recordGameResult === 'function') {
+            window.recordGameResult(outcome);
+        } else if (typeof recordGameResult === 'function') {
+            recordGameResult(outcome);
+        }
+
+        // Disable live mode on game completion
+        window._liveMode = false;
+        const chatWrapper = document.getElementById('live-chat-wrapper');
+        if (chatWrapper) chatWrapper.classList.add('hidden');
     }
 }
 

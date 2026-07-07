@@ -1041,6 +1041,12 @@
                         </div>
                         <!-- Live Chat -->
                         <div class="hidden" id="live-chat-wrapper">
+                            <!-- Live Game active controls -->
+                            <div id="live-game-controls" class="flex gap-2 mb-3">
+                                <button data-action="resignLiveGame" class="flex-1 py-1.5 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl text-xs font-bold hover:bg-red-500/20 transition-all flex items-center justify-center gap-1 cursor-pointer">
+                                    <span class="material-symbols-outlined text-sm">flag</span> Resign Game
+                                </button>
+                            </div>
                             <div id="live-chat-messages" class="h-24 overflow-y-auto flex flex-col gap-1 pr-1 text-xs"></div>
                             <div class="flex gap-1 mt-2">
                                 <input id="live-chat-input" type="text" placeholder="Type a message..."
