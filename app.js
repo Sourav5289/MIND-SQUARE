@@ -1,5 +1,5 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  Rose Three — isLoading state + fetch interceptor
+//  Chess Loader — isLoading state + fetch interceptor
 //  Pattern mirrors React's: const [isLoading, setIsLoading] = useState(false)
 //  setIsLoading(true) before fetch → setIsLoading(false) in finally block
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -7,117 +7,136 @@
     // ── State ────────────────────────────────────────────────────────────
     let isLoading = false;
     let _loadingCounter = 0;          // tracks concurrent in-flight requests
-    let _roseRafId = null;
-    let _roseStartedAt = null;
 
-    // ── Rose Three animation config ──────────────────────────────────────
-    const _roseConfig = {
-        particleCount: 76,
-        trailSpan: 0.31,
-        durationMs: 5300,
-        rotationDurationMs: 28000,
-        pulseDurationMs: 4400,
-        strokeWidth: 4.6,
-        roseA: 9.2,
-        roseABoost: 0.6,
-        roseBreathBase: 0.72,
-        roseBreathBoost: 0.28,
-        roseScale: 3.25,
-    };
+    let _3dScene = null;
+    let _3dCamera = null;
+    let _3dRenderer = null;
+    let _3dPawnGroup = null;
+    let _3dAnimFrameId = null;
 
-    function _rosePoint(progress, detailScale) {
-        const t = progress * Math.PI * 2;
-        const a = _roseConfig.roseA + detailScale * _roseConfig.roseABoost;
-        const r = a * (_roseConfig.roseBreathBase + detailScale * _roseConfig.roseBreathBoost) * Math.cos(3 * t);
-        return {
-            x: 50 + Math.cos(t) * r * _roseConfig.roseScale,
-            y: 50 + Math.sin(t) * r * _roseConfig.roseScale
-        };
+    function handleResize() {
+        if (!_3dCamera || !_3dRenderer) return;
+        const container = document.getElementById('chess-3d-loader-canvas');
+        if (!container) return;
+        const w = container.clientWidth || 130;
+        const h = container.clientHeight || 130;
+        _3dCamera.aspect = w / h;
+        _3dCamera.updateProjectionMatrix();
+        _3dRenderer.setSize(w, h);
     }
 
-    function _roseBuildPath(detailScale, steps = 480) {
-        return Array.from({ length: steps + 1 }, (_, i) => {
-            const p = _rosePoint(i / steps, detailScale);
-            return `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`;
-        }).join(' ');
-    }
+    function init3DLoader() {
+        if (typeof THREE === 'undefined') return;
+        const container = document.getElementById('chess-3d-loader-canvas');
+        if (!container) return;
 
-    function _roseNorm(p) { return ((p % 1) + 1) % 1; }
+        container.innerHTML = '';
+        const width = container.clientWidth || 130;
+        const height = container.clientHeight || 130;
 
-    function _roseDetailScale(time) {
-        const a = (time % _roseConfig.pulseDurationMs) / _roseConfig.pulseDurationMs * Math.PI * 2;
-        return 0.52 + ((Math.sin(a + 0.55) + 1) / 2) * 0.48;
-    }
+        _3dScene = new THREE.Scene();
 
-    // ── DOM refs (resolved lazily after DOMContentLoaded) ────────────────
-    let _overlay, _group, _pathEl, _particles;
+        // Transparent canvas background to overlay cleanly on glass card background
+        _3dRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        _3dRenderer.setSize(width, height);
+        _3dRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        _3dRenderer.setClearColor(0x000000, 0);
+        container.appendChild(_3dRenderer.domElement);
 
-    function _ensureParticles() {
-        if (_particles) return;
-        _overlay = document.getElementById('rose-loader-overlay');
-        _group = document.getElementById('rose-loader-group');
-        _pathEl = document.getElementById('rose-loader-path');
-        if (!_group || !_pathEl) return;
-        const SVG_NS = 'http://www.w3.org/2000/svg';
-        _pathEl.setAttribute('stroke-width', String(_roseConfig.strokeWidth));
-        _particles = Array.from({ length: _roseConfig.particleCount }, () => {
-            const c = document.createElementNS(SVG_NS, 'circle');
-            c.setAttribute('fill', 'currentColor');
-            _group.appendChild(c);
-            return c;
-        });
-    }
+        _3dCamera = new THREE.PerspectiveCamera(40, width / height, 0.1, 100);
+        _3dCamera.position.set(0, 0.1, 3.0);
 
-    function _roseRender(now) {
-        if (!_roseStartedAt) _roseStartedAt = now;
-        const time = now - _roseStartedAt;
-        const progress = (time % _roseConfig.durationMs) / _roseConfig.durationMs;
-        const ds = _roseDetailScale(time);
-        const rotation = -((time % _roseConfig.rotationDurationMs) / _roseConfig.rotationDurationMs) * 360;
+        // Moderate ambient fill light to maintain realistic shadow depth
+        const ambient = new THREE.AmbientLight(0xffffff, 0.65);
+        _3dScene.add(ambient);
 
-        _ensureParticles();
-        if (!_pathEl) { _roseRafId = requestAnimationFrame(_roseRender); return; }
+        // Strong key light shining directly from front camera angle to illuminate the face
+        const keyLight = new THREE.DirectionalLight(0xfff3db, 2.2);
+        keyLight.position.set(0, 0, 4);
+        _3dScene.add(keyLight);
 
-        _group.setAttribute('transform', `rotate(${rotation} 50 50)`);
-        _pathEl.setAttribute('d', _roseBuildPath(ds));
+        // Warm directional accent light from the upper-right
+        const spotLight = new THREE.SpotLight(0xffdf9e, 2.0, 8, Math.PI / 4, 0.5);
+        spotLight.position.set(1.5, 3, 2);
+        _3dScene.add(spotLight);
 
-        _particles.forEach((node, i) => {
-            const tailOff = i / (_roseConfig.particleCount - 1);
-            const pt = _rosePoint(_roseNorm(progress - tailOff * _roseConfig.trailSpan), ds);
-            const fade = Math.pow(1 - tailOff, 0.56);
-            node.setAttribute('cx', pt.x.toFixed(2));
-            node.setAttribute('cy', pt.y.toFixed(2));
-            node.setAttribute('r', (0.9 + fade * 2.7).toFixed(2));
-            node.setAttribute('opacity', (0.04 + fade * 0.96).toFixed(3));
+        // Cool rim light for subtle shape contour highlights
+        const rimLight = new THREE.DirectionalLight(0x76a7e9, 1.2);
+        rimLight.position.set(-2, 1, -2);
+        _3dScene.add(rimLight);
+
+        // Rich, realistic satin gold material (high metalness + balanced roughness for soft highlights)
+        const goldMaterial = new THREE.MeshStandardMaterial({
+            color: 0xdfa037, // Rich warm gold base
+            metalness: 0.82,
+            roughness: 0.24
         });
 
-        _roseRafId = requestAnimationFrame(_roseRender);
+        _3dPawnGroup = new THREE.Group();
+
+        // 3D Pawn geometry construction
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.65, 0.14, 32), goldMaterial);
+        base.position.y = -0.65;
+        _3dPawnGroup.add(base);
+
+        const collar = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.05, 12, 32), goldMaterial);
+        collar.rotation.x = Math.PI / 2;
+        collar.position.y = 0.05;
+        _3dPawnGroup.add(collar);
+
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.44, 0.65, 32), goldMaterial);
+        body.position.y = -0.3;
+        _3dPawnGroup.add(body);
+
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 32, 32), goldMaterial);
+        head.position.y = 0.32;
+        _3dPawnGroup.add(head);
+
+        _3dScene.add(_3dPawnGroup);
+
+        window.addEventListener('resize', handleResize);
     }
 
-    // ── Public setIsLoading — mirrors React's setState ───────────────────
+    function animate3DLoader(time) {
+        if (!_3dPawnGroup) return;
+
+        // Gentle rotate and hover bob
+        _3dPawnGroup.rotation.y = time * 0.0016;
+        _3dPawnGroup.position.y = Math.sin(time * 0.003) * 0.05;
+
+        if (_3dRenderer && _3dScene && _3dCamera) {
+            _3dRenderer.render(_3dScene, _3dCamera);
+        }
+        _3dAnimFrameId = requestAnimationFrame(animate3DLoader);
+    }
+
+    // ── Public setIsLoading ──────────────────────────────────────────────
     window.setIsLoading = function (value) {
         if (value) {
             _loadingCounter++;
             isLoading = true;
-            const el = document.getElementById('rose-loader-overlay');
+            const el = document.getElementById('chess-loader-overlay');
             if (el) el.classList.add('visible');
-            if (!_roseRafId) _roseRafId = requestAnimationFrame(_roseRender);
+
+            if (!_3dScene) {
+                init3DLoader();
+            }
+            handleResize();
+            if (!_3dAnimFrameId && _3dPawnGroup) {
+                _3dAnimFrameId = requestAnimationFrame(animate3DLoader);
+            }
         } else {
             _loadingCounter = Math.max(0, _loadingCounter - 1);
             if (_loadingCounter === 0) {
                 isLoading = false;
-                const el = document.getElementById('rose-loader-overlay');
+                const el = document.getElementById('chess-loader-overlay');
                 if (el) el.classList.remove('visible');
-                // keep rAF running so it's instant next time — stop after 3s idle
-                if (_roseRafId) {
-                    setTimeout(() => {
-                        if (!isLoading && _roseRafId) {
-                            cancelAnimationFrame(_roseRafId);
-                            _roseRafId = null;
-                            _roseStartedAt = null;
-                        }
-                    }, 3000);
+
+                if (_3dAnimFrameId) {
+                    cancelAnimationFrame(_3dAnimFrameId);
+                    _3dAnimFrameId = null;
                 }
+                window.removeEventListener('resize', handleResize);
             }
         }
     };
@@ -491,6 +510,75 @@ const API = {
             return null;
         }
     },
+    async getStudentProfile(studentId) {
+        try {
+            const res = await fetch(API_BASE + `/api/students/${studentId}/profile`, {
+                credentials: 'include'
+            });
+            if (!res.ok) throw new Error('Failed to get student profile');
+            return await res.json();
+        } catch (e) {
+            console.error('API.getStudentProfile error:', e);
+            return null;
+        }
+    },
+    async assignHomework(studentId, puzzleId) {
+        try {
+            const res = await fetch(API_BASE + `/api/students/${studentId}/homework`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ puzzle_id: puzzleId })
+            });
+            if (!res.ok) throw new Error('Failed to assign homework');
+            return await res.json();
+        } catch (e) {
+            console.error('API.assignHomework error:', e);
+            return null;
+        }
+    },
+    async teacherEditStudent(studentId, points, coachingNotes) {
+        try {
+            const res = await fetch(API_BASE + `/api/students/${studentId}/teacher-edit`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ points, coachingNotes })
+            });
+            if (!res.ok) throw new Error('Failed to edit student');
+            return await res.json();
+        } catch (e) {
+            console.error('API.teacherEditStudent error:', e);
+            return null;
+        }
+    },
+    async getCustomPuzzles() {
+        try {
+            const res = await fetch(API_BASE + '/api/puzzles/custom', {
+                credentials: 'include'
+            });
+            if (!res.ok) throw new Error('Failed to get custom puzzles');
+            return await res.json();
+        } catch (e) {
+            console.error('API.getCustomPuzzles error:', e);
+            return [];
+        }
+    },
+    async createCustomPuzzle(puzzleData) {
+        try {
+            const res = await fetch(API_BASE + '/api/puzzles/custom', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(puzzleData)
+            });
+            if (!res.ok) throw new Error('Failed to create custom puzzle');
+            return await res.json();
+        } catch (e) {
+            console.error('API.createCustomPuzzle error:', e);
+            return null;
+        }
+    },
     async getSchedules() {
         try {
             const hit = clientCache.get('schedules');
@@ -563,6 +651,11 @@ window.syncDatabaseWithServer = async function () {
         }
     }
 
+    // Sync custom puzzles list
+    if (typeof window.syncPuzzlesList === 'function') {
+        await window.syncPuzzlesList();
+    }
+
     renderLeaderboard();
     renderDashboard();
 };
@@ -578,7 +671,7 @@ function saveStudents(students) {
     renderLeaderboard();
 }
 
-const ADMIN_EMAIL = 's41026143@gmail.com';
+const ADMIN_EMAIL = 'mindsquarechessclasses@gmail.com';
 
 function applyAdminOverrides(user) {
     if (!user || !user.email || user.email.toLowerCase() !== ADMIN_EMAIL) return user;
@@ -1306,7 +1399,7 @@ function navigateTo(tabId, keepViewingUser = false) {
     url.searchParams.set('tab', tabId);
     window.history.replaceState({}, '', url);
 
-    const sections = ['landing-page', 'dashboard-page', 'chess-page', 'classes-page', 'leaderboard-page', 'puzzles-page', 'vision-trainer-page', 'openings-page', 'tournaments-page', 'endgame-trainer-page'];
+    const sections = ['landing-page', 'dashboard-page', 'chess-page', 'classes-page', 'leaderboard-page', 'puzzles-page', 'vision-trainer-page', 'openings-page', 'tournaments-page', 'endgame-trainer-page', 'puzzle-creator-page'];
     const targetSec = `${tabId}-page`;
 
     sections.forEach(sec => {
@@ -1327,6 +1420,18 @@ function navigateTo(tabId, keepViewingUser = false) {
             }
         }
     });
+
+    if (tabId === 'puzzle-creator') {
+        if (typeof window.initEditorBoard === 'function') {
+            window.initEditorBoard();
+        }
+    }
+
+    if (tabId === 'puzzles') {
+        if (typeof window.syncPuzzlesList === 'function') {
+            window.syncPuzzlesList();
+        }
+    }
 
     if (window.ScrollTrigger) {
         ScrollTrigger.refresh();
@@ -1404,6 +1509,8 @@ function navigateTo(tabId, keepViewingUser = false) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 window.navigateTo = navigateTo;
+window.API = API;
+window.setCurrentUser = setCurrentUser;
 
 // Calculate ELO progression details
 function getEloProgress(points, role) {
@@ -1644,19 +1751,19 @@ function renderDashboard() {
     }
 
     // Load student-specific extras (homework widget + coaching notes)
-    // Only show for a student viewing their own dashboard — hide for teachers
     const hwBlock = document.getElementById('student-homework-block');
     const coachBlock = document.getElementById('student-coaching-notes-block');
+    const isTeacherViewingStudent = !isSelf && (currentUser.role === 'teacher' || currentUser.email.toLowerCase() === ADMIN_EMAIL);
 
-    if (isSelf) {
-        // Student self-view: show both cards and populate them
+    if (isSelf || isTeacherViewingStudent) {
+        // Show both cards
         if (hwBlock) hwBlock.classList.remove('hidden');
         if (coachBlock) coachBlock.classList.remove('hidden');
         if (typeof window.loadStudentDashboardExtras === 'function') {
             window.loadStudentDashboardExtras(user.id);
         }
     } else {
-        // Teacher dashboard or viewing another profile: hide both cards
+        // Hide both cards
         if (hwBlock) hwBlock.classList.add('hidden');
         if (coachBlock) coachBlock.classList.add('hidden');
     }
@@ -2759,79 +2866,86 @@ window.openSidebar = function () {
 
 
 // Load homework widget and coaching notes for student dashboard
+// Load homework widget and coaching notes for student dashboard
 window.loadStudentDashboardExtras = async function (userId) {
     if (!userId) return;
     const user = getStudents().find(s => s.id === userId);
 
-    // --- Coaching notes block (always visible) ---
+    const currentUser = getCurrentUser();
+    const isTeacher = currentUser && (currentUser.role === 'teacher' || currentUser.email.toLowerCase() === ADMIN_EMAIL);
+
+    // Always hide the homework widget block for both student and teacher dashboard views
+    const hwBlock = document.getElementById('student-homework-block');
+    if (hwBlock) {
+        hwBlock.classList.add('hidden');
+    }
+
     const coachText = document.getElementById('student-coaching-notes-text');
-    if (coachText) {
-        const notes = user && user.coachingNotes ? user.coachingNotes.trim() : '';
-        coachText.innerText = notes || 'No coaching notes yet from your coach.';
-    }
+    const coachBlock = document.getElementById('student-coaching-notes-block');
 
-    // --- Homework widget (always visible, shows all items) ---
-    const hwList = document.getElementById('student-homework-list');
-    if (!hwList) return;
+    if (coachBlock) {
+        if (isTeacher && userId !== currentUser.id) {
+            // Show score/rating adjustment card for the teacher
+            coachBlock.classList.remove('hidden');
+            const titleEl = coachBlock.querySelector('.card-title');
+            if (titleEl) {
+                titleEl.innerHTML = `<span class="material-symbols-outlined text-primary">edit</span> Adjust Student Rating`;
+            }
+            if (coachText) {
+                const currentPoints = user ? user.points || 0 : 0;
+                coachText.innerHTML = `
+                    <div class="flex flex-col gap-3 mt-2">
+                        <!-- Direct ELO Points Adjustment -->
+                        <div class="flex items-center justify-between p-2.5 bg-surface-container-high rounded-xl border border-outline-variant/30 font-body-md">
+                            <div class="flex flex-col">
+                                <span class="text-[10px] text-primary font-bold uppercase tracking-wider">Direct ELO Points</span>
+                                <span class="text-[10px] text-on-surface-variant">Update student rating score</span>
+                            </div>
+                            <input id="coach-student-points-input" type="number" value="${currentPoints}" class="w-20 bg-background border border-outline-variant/50 text-on-background text-xs rounded-lg px-2 py-1 text-center font-bold focus:outline-none focus:border-primary" />
+                        </div>
 
-    const homeworkItems = await API.getHomework(userId);
-    if (!homeworkItems || homeworkItems.length === 0) {
-        hwList.innerHTML = '<span class="text-xs text-on-surface-variant italic">No homework assigned yet.</span>';
-        return;
-    }
-
-    hwList.innerHTML = '';
-
-    // Sort: pending first, then completed
-    const sorted = [...homeworkItems].sort((a, b) => {
-        if (a.completed === b.completed) return 0;
-        return a.completed ? 1 : -1;
-    });
-
-    sorted.forEach(hw => {
-        const puzzle = (typeof PUZZLES !== 'undefined') ? PUZZLES.find(p => p.id === hw.puzzle_id) : null;
-        const puzzleTitle = puzzle ? puzzle.title : hw.puzzle_id;
-        const item = document.createElement('div');
-
-        if (hw.completed) {
-            // Completed homework — show green tick, no button
-            item.className = 'homework-item homework-item-done';
-            item.innerHTML = `
-                <span class="material-symbols-outlined text-emerald-400 text-sm">task_alt</span>
-                <div class="flex-1 min-w-0">
-                    <span class="text-xs font-semibold text-emerald-400 block truncate line-through opacity-70">${escapeHTML(puzzleTitle)}</span>
-                    <span class="text-[10px] text-on-surface-variant">${escapeHTML(hw.puzzle_id)} · Completed ✓</span>
-                </div>
-                <span class="homework-done-badge">Done</span>
-            `;
+                        <button data-action="coachSavePointsAndNotes" data-arg="${escapeHTML(userId)}" class="w-full py-2 bg-primary text-on-primary rounded-xl text-xs font-bold transition-all hover:bg-primary/90 flex items-center justify-center gap-1.5">
+                            <span class="material-symbols-outlined text-sm">save</span> Save Rating
+                        </button>
+                    </div>
+                `;
+            }
         } else {
-            // Pending homework — show solve button
-            item.className = 'homework-item';
-            item.innerHTML = `
-                <span class="material-symbols-outlined text-amber-400 text-sm">task</span>
-                <div class="flex-1 min-w-0">
-                    <span class="text-xs font-semibold text-on-surface block truncate">${escapeHTML(puzzleTitle)}</span>
-                    <span class="text-[10px] text-on-surface-variant">${escapeHTML(hw.puzzle_id)} · Assigned by coach</span>
-                </div>
-                <button data-action="startHomeworkPuzzle" data-hw-id="${escapeHTML(hw.id)}" data-puzzle-id="${escapeHTML(hw.puzzle_id)}" data-user-id="${escapeHTML(userId)}" class="homework-item-btn">
-                    Solve
-                </button>
-            `;
+            // Hide coaching notes completely for students
+            coachBlock.classList.add('hidden');
         }
-        hwList.appendChild(item);
-    });
+    }
 };
 
-// Navigate to puzzle tab and set the active puzzle for solving homework
+// Navigate to puzzle tab and set the active puzzle for solving homework (stub)
 window.startHomeworkPuzzle = function (assignmentId, puzzleId, studentId) {
-    window._pendingHomeworkAssignmentId = assignmentId;
-    window._pendingHomeworkStudentId = studentId;
-    // Set active puzzle in chess engine
-    if (typeof PUZZLES !== 'undefined') {
-        window.activePuzzleId = puzzleId;
-    }
     navigateTo('puzzles');
-    showNotification(`Now solving: ${puzzleId}. Complete it to mark homework done!`, 'info');
+};
+
+// Stub for homework assignment
+window.coachAssignHomework = async function(studentId) {
+    return;
+};
+
+window.coachSavePointsAndNotes = async function(studentId) {
+    const pointsInput = document.getElementById('coach-student-points-input');
+    if (!pointsInput) return;
+
+    const points = parseInt(pointsInput.value, 10) || 0;
+
+    showNotification("Saving student rating...", "info");
+    const result = await API.teacherEditStudent(studentId, points, "");
+    if (result) {
+        showNotification("Student rating saved successfully!", "success");
+        
+        // Refresh local students cache and dashboard view immediately
+        await window.syncDatabaseWithServer();
+        if (typeof renderDashboard === 'function') {
+            renderDashboard();
+        }
+    } else {
+        showNotification("Failed to save rating.", "error");
+    }
 };
 
 // =======================================================
@@ -3126,6 +3240,10 @@ async function checkTeacherRole() {
         }
         if (addTournamentBtn) {
             addTournamentBtn.classList.toggle('hidden', currentUserRole !== 'teacher');
+        }
+        const creatorLink = document.getElementById('sidebar-puzzle-creator-link');
+        if (creatorLink) {
+            creatorLink.classList.toggle('hidden', currentUserRole !== 'teacher');
         }
     } catch (e) {}
 }
@@ -4534,3 +4652,315 @@ function generateBracketPairings(players) {
     
     return pairings;
 }
+
+// ================================================================
+// CUSTOM PUZZLE CREATOR LOGIC
+// ================================================================
+let editorGrid = Array(8).fill(null).map(() => Array(8).fill(null));
+let activePaletteTool = 'select'; // 'select', 'eraser', 'wp', 'wn', etc.
+let editorTurn = 'w';
+let selectedEditorSquare = null;
+let STATIC_PUZZLES = null;
+
+// Sync custom puzzles into global PUZZLES array
+window.syncPuzzlesList = async function() {
+    if (typeof PUZZLES === 'undefined') return;
+    if (!STATIC_PUZZLES) {
+        STATIC_PUZZLES = [...PUZZLES];
+    }
+    
+    // Skip fetching if the user is not logged in (guest)
+    if (!getCurrentUser()) return;
+    
+    try {
+        const custom = await API.getCustomPuzzles();
+        if (Array.isArray(custom)) {
+            PUZZLES = [...STATIC_PUZZLES, ...custom];
+        }
+    } catch (e) {
+        console.error("Failed to sync custom puzzles list:", e);
+    }
+    
+    if (typeof renderPuzzlesList === 'function') {
+        renderPuzzlesList();
+    }
+};
+
+// Initialize Custom Puzzle Board Editor UI elements
+window.initEditorBoard = function() {
+    const gridEl = document.getElementById('editor-board-grid');
+    if (!gridEl) return;
+
+    // Render palette pieces (White)
+    const whitePalette = document.getElementById('editor-palette-white');
+    if (whitePalette && typeof SVG_PIECES !== 'undefined') {
+        const whiteTypes = ['wp', 'wn', 'wb', 'wr', 'wq', 'wk'];
+        whitePalette.innerHTML = whiteTypes.map(key => `
+            <button data-action="selectPalettePiece" data-arg="${key}" class="w-10 h-10 p-1 bg-surface-container-high hover:bg-surface-bright rounded-lg border border-outline-variant/40 hover:scale-105 transition-all flex items-center justify-center cursor-pointer">
+                ${SVG_PIECES[key].replace('<svg', '<svg class="w-full h-full"')}
+            </button>
+        `).join('');
+    }
+
+    // Render palette pieces (Black)
+    const blackPalette = document.getElementById('editor-palette-black');
+    if (blackPalette && typeof SVG_PIECES !== 'undefined') {
+        const blackTypes = ['bp', 'bn', 'bb', 'br', 'bq', 'bk'];
+        blackPalette.innerHTML = blackTypes.map(key => `
+            <button data-action="selectPalettePiece" data-arg="${key}" class="w-10 h-10 p-1 bg-surface-container-high hover:bg-surface-bright rounded-lg border border-outline-variant/40 hover:scale-105 transition-all flex items-center justify-center cursor-pointer">
+                ${SVG_PIECES[key].replace('<svg', '<svg class="w-full h-full"')}
+            </button>
+        `).join('');
+    }
+
+    // Reset editor turn indicators
+    selectEditorTurn('w');
+    // Default to standard layout starting board
+    resetEditorBoard('standard');
+};
+
+// Reset Editor Board layout
+window.resetEditorBoard = function(mode) {
+    if (mode === 'standard') {
+        editorGrid = [
+            ['br', 'bn', 'bb', 'bq', 'bk', 'bb', 'bn', 'br'],
+            ['bp', 'bp', 'bp', 'bp', 'bp', 'bp', 'bp', 'bp'],
+            [null, null, null, null, null, null, null, null],
+            [null, null, null, null, null, null, null, null],
+            [null, null, null, null, null, null, null, null],
+            [null, null, null, null, null, null, null, null],
+            ['wp', 'wp', 'wp', 'wp', 'wp', 'wp', 'wp', 'wp'],
+            ['wr', 'wn', 'wb', 'wq', 'wk', 'wb', 'wn', 'wr']
+        ];
+    } else {
+        editorGrid = Array(8).fill(null).map(() => Array(8).fill(null));
+    }
+    selectedEditorSquare = null;
+    renderEditorBoard();
+};
+
+// Render custom puzzle board
+window.renderEditorBoard = function() {
+    const gridEl = document.getElementById('editor-board-grid');
+    if (!gridEl) return;
+
+    gridEl.innerHTML = '';
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            const cell = document.createElement('div');
+            cell.className = `relative aspect-square flex items-center justify-center cursor-pointer border border-outline-variant/15 select-none transition-all duration-150`;
+            
+            const isDark = (r + c) % 2 === 1;
+            cell.style.backgroundColor = isDark ? '#2e7d32' : '#e8f5e9'; // Green/White wood skin colors
+            
+            cell.dataset.row = r;
+            cell.dataset.col = c;
+
+            // Highlight selected editor square
+            if (selectedEditorSquare && selectedEditorSquare.row === r && selectedEditorSquare.col === c) {
+                cell.className += ' ring-4 ring-secondary/80 ring-inset bg-secondary/15';
+            }
+
+            const pKey = editorGrid[r][c];
+            if (pKey && typeof SVG_PIECES !== 'undefined') {
+                const pieceSvg = SVG_PIECES[pKey].replace('<svg', '<svg class="w-full h-full"');
+                cell.innerHTML = `<div class="w-4/5 h-4/5 flex items-center justify-center transform active:scale-95 transition-transform pointer-events-none">${pieceSvg}</div>`;
+            }
+
+            cell.onclick = () => handleEditorCellClick(r, c);
+            gridEl.appendChild(cell);
+        }
+    }
+};
+
+function handleEditorCellClick(row, col) {
+    if (activePaletteTool === 'select') {
+        if (selectedEditorSquare) {
+            const fromPiece = editorGrid[selectedEditorSquare.row][selectedEditorSquare.col];
+            editorGrid[row][col] = fromPiece;
+            editorGrid[selectedEditorSquare.row][selectedEditorSquare.col] = null;
+            selectedEditorSquare = null;
+        } else {
+            if (editorGrid[row][col]) {
+                selectedEditorSquare = { row, col };
+            }
+        }
+    } else if (activePaletteTool === 'eraser') {
+        editorGrid[row][col] = null;
+        selectedEditorSquare = null;
+    } else {
+        editorGrid[row][col] = activePaletteTool;
+        selectedEditorSquare = null;
+    }
+    renderEditorBoard();
+}
+
+window.selectPaletteTool = function(tool) {
+    activePaletteTool = tool;
+    selectedEditorSquare = null;
+
+    const eraserBtn = document.getElementById('palette-tool-eraser');
+    const selectBtn = document.getElementById('palette-tool-select');
+
+    if (eraserBtn) {
+        if (tool === 'eraser') {
+            eraserBtn.className = "px-4 py-1.5 bg-red-500 text-white rounded-xl text-xs font-bold border border-red-600 transition-all flex items-center gap-1.5 cursor-pointer";
+        } else {
+            eraserBtn.className = "px-4 py-1.5 bg-surface-variant text-on-surface rounded-xl text-xs font-bold border border-outline-variant/40 hover:bg-surface-bright transition-all flex items-center gap-1.5 cursor-pointer";
+        }
+    }
+
+    if (selectBtn) {
+        if (tool === 'select') {
+            selectBtn.className = "px-4 py-1.5 bg-secondary text-on-secondary rounded-xl text-xs font-bold border border-secondary/40 transition-all flex items-center gap-1.5 cursor-pointer";
+        } else {
+            selectBtn.className = "px-4 py-1.5 bg-surface-variant text-on-surface rounded-xl text-xs font-bold border border-outline-variant/40 hover:bg-surface-bright transition-all flex items-center gap-1.5 cursor-pointer";
+        }
+    }
+    
+    document.querySelectorAll('#editor-palette-white button, #editor-palette-black button').forEach(btn => {
+        btn.classList.remove('ring-4', 'ring-secondary', 'bg-secondary/15');
+    });
+};
+
+window.selectPalettePiece = function(pieceCode, btn) {
+    window.selectPaletteTool(pieceCode);
+    if (btn) {
+        btn.classList.add('ring-4', 'ring-secondary', 'bg-secondary/15');
+    }
+};
+
+window.selectEditorTurn = function(turn) {
+    editorTurn = turn;
+    
+    const turnW = document.getElementById('editor-turn-w');
+    const turnB = document.getElementById('editor-turn-b');
+
+    if (turnW && turnB) {
+        if (turn === 'w') {
+            turnW.className = "flex-1 py-2 bg-secondary text-on-secondary rounded-xl text-xs font-bold border border-secondary/40 transition-all cursor-pointer";
+            turnB.className = "flex-1 py-2 bg-surface-container-high text-on-surface rounded-xl text-xs font-bold border border-outline-variant/30 transition-all cursor-pointer";
+        } else {
+            turnB.className = "flex-1 py-2 bg-secondary text-on-secondary rounded-xl text-xs font-bold border border-secondary/40 transition-all cursor-pointer";
+            turnW.className = "flex-1 py-2 bg-surface-container-high text-on-surface rounded-xl text-xs font-bold border border-outline-variant/30 transition-all cursor-pointer";
+        }
+    }
+};
+
+function getEditorFEN() {
+    let rows = [];
+    for (let r = 0; r < 8; r++) {
+        let empty = 0;
+        let rowStr = '';
+        for (let c = 0; c < 8; c++) {
+            const piece = editorGrid[r][c];
+            if (piece) {
+                if (empty > 0) {
+                    rowStr += empty;
+                    empty = 0;
+                }
+                const color = piece[0];
+                const type = piece[1].toUpperCase();
+                rowStr += (color === 'w') ? type : type.toLowerCase();
+            } else {
+                empty++;
+            }
+        }
+        if (empty > 0) {
+            rowStr += empty;
+        }
+        rows.push(rowStr);
+    }
+    return rows.join('/') + ` ${editorTurn} KQkq - 0 1`;
+}
+
+window.publishCustomPuzzle = async function() {
+    const titleInput = document.getElementById('editor-puzzle-title');
+    const descInput = document.getElementById('editor-puzzle-desc');
+    const hintInput = document.getElementById('editor-puzzle-hint');
+    const rewardInput = document.getElementById('editor-puzzle-reward');
+    const solutionFromInput = document.getElementById('editor-solution-from');
+    const solutionToInput = document.getElementById('editor-solution-to');
+
+    if (!titleInput || !descInput || !hintInput || !rewardInput || !solutionFromInput || !solutionToInput) return;
+
+    const title = titleInput.value.trim();
+    const description = descInput.value.trim();
+    const hint = hintInput.value.trim();
+    const reward = parseInt(rewardInput.value, 10) || 15;
+    const fromSquare = solutionFromInput.value.trim().toLowerCase();
+    const toSquare = solutionToInput.value.trim().toLowerCase();
+
+    if (!title) return showNotification("Please enter a puzzle title.", "error");
+    if (!description) return showNotification("Please enter a puzzle description.", "error");
+    
+    const coordRegex = /^[a-h][1-8]$/;
+    if (!coordRegex.test(fromSquare) || !coordRegex.test(toSquare)) {
+        return showNotification("Invalid move coordinates. Must be e.g. e2 and e4.", "error");
+    }
+
+    const solution = `${fromSquare}-${toSquare}`;
+
+    // Validate that position has both Kings
+    let whiteKings = 0;
+    let blackKings = 0;
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            if (editorGrid[r][c] === 'wk') whiteKings++;
+            if (editorGrid[r][c] === 'bk') blackKings++;
+        }
+    }
+
+    if (whiteKings !== 1 || blackKings !== 1) {
+        return showNotification("A valid chess position requires exactly one White King and one Black King.", "error");
+    }
+
+    const fen = getEditorFEN();
+
+    showNotification("Publishing custom puzzle...", "info");
+    const result = await API.createCustomPuzzle({
+        title,
+        description,
+        fen,
+        solution,
+        hint,
+        reward
+    });
+
+    if (result) {
+        showNotification("Puzzle published successfully! 🎉", "success");
+        
+        // Reset form inputs
+        titleInput.value = '';
+        descInput.value = '';
+        hintInput.value = '';
+        rewardInput.value = '15';
+        solutionFromInput.value = '';
+        solutionToInput.value = '';
+        
+        resetEditorBoard('standard');
+        
+        // Refresh local cache and list views
+        await window.syncPuzzlesList();
+    } else {
+        showNotification("Failed to publish puzzle.", "error");
+    }
+};
+
+// Global Capturing Event Listener to resolve avatar loading failures (e.g. 429 rate limit)
+// without violating Content Security Policy (CSP) with inline scripting
+document.addEventListener('error', function (event) {
+    const target = event.target;
+    if (target && target.tagName === 'IMG') {
+        const isAvatar = target.id === 'navbar-avatar' || 
+                         target.id === 'dash-user-avatar' || 
+                         target.classList.contains('object-cover') ||
+                         target.src.includes('googleusercontent.com');
+                         
+        if (isAvatar) {
+            if (target.dataset.fallbackApplied) return;
+            target.dataset.fallbackApplied = 'true';
+            target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2394a3b8"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>`;
+        }
+    }
+}, true); // capturing phase required because error event does not bubble

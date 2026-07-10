@@ -555,6 +555,16 @@ function executeGlobalAction(action, arg, target, event) {
                 window.resignLiveGame();
             }
             break;
+        case 'coachAssignHomework':
+            if (typeof window.coachAssignHomework === 'function') {
+                window.coachAssignHomework(arg);
+            }
+            break;
+        case 'coachSavePointsAndNotes':
+            if (typeof window.coachSavePointsAndNotes === 'function') {
+                window.coachSavePointsAndNotes(arg);
+            }
+            break;
         case 'startCustomRepertoireMode':
             if (typeof window.startCustomRepertoireMode === 'function') window.startCustomRepertoireMode();
             else if (typeof startCustomRepertoireMode === 'function') startCustomRepertoireMode();
@@ -574,6 +584,31 @@ function executeGlobalAction(action, arg, target, event) {
         case 'submitAnnouncement':
             if (typeof window.submitAnnouncement === 'function') window.submitAnnouncement();
             else if (typeof submitAnnouncement === 'function') submitAnnouncement();
+            break;
+        case 'selectPalettePiece':
+            if (typeof window.selectPalettePiece === 'function') {
+                window.selectPalettePiece(arg, element);
+            }
+            break;
+        case 'selectPaletteTool':
+            if (typeof window.selectPaletteTool === 'function') {
+                window.selectPaletteTool(arg);
+            }
+            break;
+        case 'selectEditorTurn':
+            if (typeof window.selectEditorTurn === 'function') {
+                window.selectEditorTurn(arg);
+            }
+            break;
+        case 'publishCustomPuzzle':
+            if (typeof window.publishCustomPuzzle === 'function') {
+                window.publishCustomPuzzle();
+            }
+            break;
+        case 'resetEditorBoard':
+            if (typeof window.resetEditorBoard === 'function') {
+                window.resetEditorBoard(arg);
+            }
             break;
         case 'submitDob':
             if (typeof window.submitDob === 'function') window.submitDob();

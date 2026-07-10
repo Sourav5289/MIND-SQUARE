@@ -277,6 +277,9 @@ function rateLimiter({ max, windowMs, storeType = 'general' }) {
 
 // Database-backed composite rate limiter specifically for auth endpoints (1.3 Brute-Force, IP + User-based)
 async function dbAuthRateLimiter(req, res, next) {
+    if (process.env.NODE_ENV === 'development') {
+        return next();
+    }
     const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
     const email = req.body?.email || '';
     const now = new Date();
@@ -1008,10 +1011,16 @@ app.use((req, res, next) => {
     });
 });
 
-// Apply general API rate limiting to all requests
-app.use('/api/', rateLimiter({ max: 150, windowMs: 15 * 60 * 1000, storeType: 'general' }));
+// Apply general API rate limiting to all requests (bypassed in development mode)
+if (process.env.NODE_ENV === 'development') {
+    app.use('/api/', (req, res, next) => next());
+} else {
+    app.use('/api/', rateLimiter({ max: 150, windowMs: 15 * 60 * 1000, storeType: 'general' }));
+}
 
-const statsRateLimiter = rateLimiter({ max: 30, windowMs: 15 * 60 * 1000, storeType: 'stats' });
+const statsRateLimiter = process.env.NODE_ENV === 'development'
+    ? (req, res, next) => next()
+    : rateLimiter({ max: 30, windowMs: 15 * 60 * 1000, storeType: 'stats' });
 
 
 // PostgreSQL connection pool — sized for typical Express concurrency.
@@ -1219,6 +1228,21 @@ async function setupDatabaseSchema() {
         )
     `);
 
+    // Create Custom Puzzles table (Coach-created)
+    await executeQuery(`
+        CREATE TABLE IF NOT EXISTS custom_puzzles (
+            id          VARCHAR(100) PRIMARY KEY,
+            title       VARCHAR(200) NOT NULL,
+            description TEXT,
+            fen         TEXT NOT NULL,
+            solution    VARCHAR(100) NOT NULL,
+            hint        TEXT,
+            reward      INTEGER DEFAULT 10,
+            created_by  VARCHAR(50) REFERENCES students(id) ON DELETE CASCADE,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
     // Create Class Schedules table
     await executeQuery(`
         CREATE TABLE IF NOT EXISTS class_schedules (
@@ -1359,6 +1383,7 @@ async function setupDatabaseSchema() {
     await executeQuery('CREATE INDEX IF NOT EXISTS idx_homework_assignments_student_puzzle ON homework_assignments(student_id, puzzle_id)');
     await executeQuery('CREATE INDEX IF NOT EXISTS idx_announcements_created ON announcements(created_at DESC)');
     await executeQuery('CREATE INDEX IF NOT EXISTS idx_tournaments_status    ON academy_tournaments(status)');
+    await executeQuery('CREATE INDEX IF NOT EXISTS idx_custom_puzzles_creator ON custom_puzzles(created_by)');
 
 
     // 3. Check if we should seed or migrate from memory_db.json
@@ -1637,7 +1662,7 @@ async function getStudentsDetailedList({ limit = 100, offset = 0, search = '' } 
 
     const rows = await executeQuery(query, params);
     // Exclude the academy owner account from the public leaderboard
-    const ADMIN_EMAIL = 's41026143@gmail.com';
+    const ADMIN_EMAIL = 'mindsquarechessclasses@gmail.com';
     const result = rows.map(mapStudentRow).filter(s => s.email?.toLowerCase() !== ADMIN_EMAIL);
 
     if (isDefaultLeaderboard) {
@@ -1754,10 +1779,8 @@ app.get('/api/students/me', authenticate, async (req, res) => {
         if (!profile) {
             return res.status(404).json({ error: 'Profile not found' });
         }
-        // SECURITY: Strip coaching_notes — these are confidential coach-only observations.
-        // Students should not be able to read notes their coach has written about them.
-        const { coachingNotes: _stripped, ...safeProfile } = profile;
-        res.json(safeProfile);
+        // Allow user to view their own coaching notes/feedback
+        res.json(profile);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to retrieve profile' });
@@ -2321,6 +2344,108 @@ app.put('/api/students/:id/homework/:assignmentId/complete', authenticate, async
     }
 });
 
+// GET /api/students/:id/profile — teacher only
+app.get('/api/students/:id/profile', authenticate, async (req, res) => {
+    if (req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Only the teacher can access student profiles.' });
+    }
+    try {
+        const profile = await getStudentById(req.params.id);
+        if (!profile) return res.status(404).json({ error: 'Student not found.' });
+        res.json(profile);
+    } catch (err) {
+        console.error('Failed to get student profile:', err);
+        res.status(500).json({ error: 'Failed to retrieve profile' });
+    }
+});
+
+// POST /api/students/:id/homework — teacher only
+app.post('/api/students/:id/homework', authenticate, async (req, res) => {
+    if (req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Only the teacher can assign homework.' });
+    }
+    const { id } = req.params;
+    const { puzzle_id } = req.body;
+    if (!puzzle_id) return res.status(400).json({ error: 'Puzzle ID is required.' });
+    
+    try {
+        const rows = await executeQuery(
+            'INSERT INTO homework_assignments (student_id, puzzle_id) VALUES (?, ?) ON CONFLICT (student_id, puzzle_id) DO NOTHING RETURNING *',
+            [id, puzzle_id]
+        );
+        res.json(rows[0] || { success: true });
+    } catch (err) {
+        console.error('Failed to assign homework:', err);
+        res.status(500).json({ error: 'Failed to assign homework' });
+    }
+});
+
+// POST /api/students/:id/teacher-edit — teacher only
+app.post('/api/students/:id/teacher-edit', authenticate, async (req, res) => {
+    if (req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Only the teacher can edit student details.' });
+    }
+    const { id } = req.params;
+    const { points, coachingNotes } = req.body;
+    
+    try {
+        let category = 'Beginner';
+        const pts = parseInt(points, 10) || 0;
+        if (pts < 1500) category = 'Beginner';
+        else if (pts < 2500) category = 'Intermediate';
+        else if (pts < 3500) category = 'Super Intermediate';
+        else if (pts < 5000) category = 'Advanced';
+        else if (pts < 10000) category = 'Super Advanced';
+        else category = 'Grandmaster';
+
+        await executeQuery(
+            'UPDATE students SET points = ?, category = ?, coaching_notes = ? WHERE id = ?',
+            [pts, category, coachingNotes || '', id]
+        );
+        res.json({ success: true, points: pts, category, coachingNotes });
+    } catch (err) {
+        console.error('Failed to update student details by teacher:', err);
+        res.status(500).json({ error: 'Failed to update student details' });
+    }
+});
+
+// GET /api/puzzles/custom — fetches all custom puzzles
+app.get('/api/puzzles/custom', authenticate, async (req, res) => {
+    try {
+        const rows = await executeQuery('SELECT * FROM custom_puzzles ORDER BY created_at DESC');
+        res.json(rows);
+    } catch (err) {
+        console.error('Failed to get custom puzzles:', err);
+        res.status(500).json({ error: 'Failed to retrieve custom puzzles' });
+    }
+});
+
+// POST /api/puzzles/custom — teacher only creates a custom puzzle
+app.post('/api/puzzles/custom', authenticate, async (req, res) => {
+    if (req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Only the teacher can create custom puzzles.' });
+    }
+    const { title, description, fen, solution, hint, reward } = req.body;
+    if (!title || !fen || !solution) {
+        return res.status(400).json({ error: 'Title, FEN position, and move solution are required.' });
+    }
+    
+    // Auto-generate a unique custom puzzle ID
+    const customPuzzleId = 'CPZ-' + Math.floor(100000 + Math.random() * 900000);
+    const ptsReward = parseInt(reward, 10) || 10;
+    
+    try {
+        const rows = await executeQuery(
+            'INSERT INTO custom_puzzles (id, title, description, fen, solution, hint, reward, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *',
+            [customPuzzleId, title, description || '', fen, solution, hint || '', ptsReward, req.user.id]
+        );
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('Failed to create custom puzzle:', err);
+        res.status(500).json({ error: 'Failed to create custom puzzle' });
+    }
+});
+
 // Check and apply annual birthday reward (points)
 app.post('/api/students/:id/check-birthday', authenticate, async (req, res) => {
     const { id } = req.params;
@@ -2634,29 +2759,8 @@ app.delete('/api/schedules/recordings/:id', authenticate, async (req, res) => {
 // ============================================================
 // TEACHER INFO API (client-side teacher check)
 // ============================================================
-app.get('/api/me/role', authenticate, async (req, res) => {
-    try {
-        const student = await getStudentById(req.user.id);
-        if (student) {
-            // If the database role changed (e.g. became teacher via config update),
-            // auto-upgrade the user's session token cookie transparently without requiring logout.
-            if (student.role !== req.user.role) {
-                const newAccessToken = generateSessionToken(student.id, student.role);
-                const isProd = process.env.COOKIE_SECURE === 'true';
-                res.cookie('ms_session_v2', newAccessToken, {
-                    httpOnly: true,
-                    sameSite: 'Strict',
-                    secure: isProd,
-                    path: '/',
-                    maxAge: 15 * 60 * 1000 // 15 mins
-                });
-            }
-            return res.json({ role: student.role, id: student.id });
-        }
-        res.json({ role: req.user.role, id: req.user.id });
-    } catch (e) {
-        res.json({ role: req.user.role, id: req.user.id });
-    }
+app.get('/api/me/role', authenticate, (req, res) => {
+    res.json({ role: req.user.role, id: req.user.id });
 });
 
 // Catch-all route to serve 1.html for any frontend client-side routes (SPA redirect support)

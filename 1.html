@@ -29,17 +29,17 @@
 <body
     class="bg-background text-on-background font-body-md selection:bg-secondary selection:text-on-secondary transition-all pl-64">
 
-    <!-- ── Rose Three Loader Overlay ──────────────────────────────── -->
-    <div id="rose-loader-overlay" role="status" aria-live="polite" aria-label="Loading">
-        <div class="rose-frame">
-            <svg viewBox="0 0 100 100" fill="none" aria-hidden="true">
-                <g id="rose-loader-group">
-                    <path id="rose-loader-path" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"
-                        opacity="0.12"></path>
-                </g>
-            </svg>
+    <!-- ── Compact 3D Chess Loader Overlay ──────────────────────── -->
+    <div id="chess-loader-overlay" role="status" aria-live="polite" aria-label="Loading">
+        <div class="loader-card">
+            <div id="chess-3d-loader-canvas"></div>
+            <div class="loader-hud">
+                <span id="chess-loader-label">LOADING.....</span>
+                <div class="loader-progress-container">
+                    <div class="loader-progress-bar"></div>
+                </div>
+            </div>
         </div>
-        <span id="rose-loader-label">Loading&hellip;</span>
     </div>
 
     <header
@@ -196,6 +196,10 @@
             <a data-nav="leaderboard" class="sidebar-link">
                 <span class="material-symbols-outlined">leaderboard</span>
                 <span class="font-body-md font-semibold">Scorecard</span>
+            </a>
+            <a data-nav="puzzle-creator" id="sidebar-puzzle-creator-link" class="sidebar-link hidden">
+                <span class="material-symbols-outlined text-secondary">edit_square</span>
+                <span class="font-body-md font-semibold text-secondary">Puzzle Creator</span>
             </a>
         </div>
 
@@ -886,6 +890,24 @@
                 <div class="lg:col-span-4 space-y-8">
 
 
+                    <!-- Homework Widget -->
+                    <div id="student-homework-block" class="card hidden">
+                        <h4 class="card-title flex items-center gap-1.5 text-secondary">
+                            <span class="material-symbols-outlined">assignment</span> Assigned Homework
+                        </h4>
+                        <div id="student-homework-list" class="flex flex-col gap-3 mt-3">
+                            <!-- Populated dynamically in app.js -->
+                        </div>
+                    </div>
+
+                    <!-- Coaching Notes Widget -->
+                    <div id="student-coaching-notes-block" class="card hidden">
+                        <h4 class="card-title flex items-center gap-1.5 text-primary">
+                            <span class="material-symbols-outlined">description</span> Coach's Feedback & Notes
+                        </h4>
+                        <p id="student-coaching-notes-text" class="text-xs text-on-surface-variant font-body-md leading-relaxed mt-2 whitespace-pre-line"></p>
+                    </div>
+
                     <!-- Daily Puzzle Widget -->
                     <div id="daily-puzzle-block" class="card">
                         <h4 class="card-title flex items-center gap-1.5">
@@ -974,7 +996,7 @@
 
                     <div class="flex gap-4 items-stretch justify-center w-full max-w-[700px]">
                         <!-- Vertical Eval Bar -->
-                        <div id="arena-eval-bar-container"
+                        <div id="arena-eval-bar-container" style="display: none !important;"
                             class="w-6 bg-surface-container/60 rounded-xl overflow-hidden border border-outline-variant/30 flex flex-col justify-end relative shadow-lg">
                             <div id="arena-eval-bar-black" class="w-full bg-[#1e232b] transition-all duration-300"
                                 style="height: 50%;"></div>
@@ -1069,8 +1091,7 @@
                         <span class="text-xs text-on-surface-variant uppercase tracking-wider block font-bold">Arena
                             Mode Setup</span>
                         <div class="flex flex-col gap-3">
-                            <label class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Game
-                                Mode</label>
+                            <label for="arena-mode-select" class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Game Mode</label>
                             <select id="arena-mode-select"
                                 class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-2.5 w-full focus:outline-none focus:border-secondary transition-all">
                                 <option value="vs-computer">VS Computer (Minimax AI)</option>
@@ -1081,7 +1102,7 @@
 
                         <!-- Arena Difficulty (shown only for VS Computer mode) -->
                         <div id="arena-difficulty-section" class="flex flex-col gap-2">
-                            <label class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">AI Difficulty</label>
+                            <span class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">AI Difficulty</span>
                             <div class="grid grid-cols-3 gap-2">
                                 <button id="btn-diff-easy" data-action="changeDifficulty" data-arg="easy"
                                     class="py-2 rounded-xl text-xs font-semibold bg-surface-container-high text-on-surface border border-outline-variant hover:bg-surface-variant/30 transition-all hover:border-secondary">Easy</button>
@@ -1105,8 +1126,7 @@
                         </div>
 
                         <div id="arena-clock-selector-box" class="flex flex-col gap-3">
-                            <label class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Chess
-                                Clock Preset</label>
+                            <span class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Chess Clock Preset</span>
                             <div class="grid grid-cols-2 gap-2">
                                 <button data-action="selectClockPreset" data-arg="0"
                                     class="clock-preset-btn py-2 bg-secondary text-on-secondary rounded-xl text-xs font-semibold transition-all">Untimed</button>
@@ -1777,6 +1797,133 @@
         </div>
 
         <!-- ============================================== -->
+        <!-- 4.2 CUSTOM PUZZLE CREATOR TAB -->
+        <!-- ============================================== -->
+        <div id="puzzle-creator-page" class="hidden min-h-screen pt-24 pb-16 px-margin-mobile md:px-margin-desktop">
+            <div class="grid grid-cols-1 xl:grid-cols-12 gap-8 max-w-[1400px] mx-auto">
+                
+                <!-- Editor Board Column -->
+                <div class="xl:col-span-8 flex flex-col items-center">
+                    <div class="w-full flex items-center justify-between mb-6 bg-surface-container p-3 rounded-2xl border border-outline-variant/20 shadow-md">
+                        <div class="flex gap-2">
+                            <span class="text-xs font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5 px-2">
+                                <span class="material-symbols-outlined">edit_square</span> Custom Puzzle Builder
+                            </span>
+                        </div>
+                        <div class="flex gap-2">
+                            <button data-action="resetEditorBoard" data-arg="blank" class="px-3 py-1.5 bg-surface-variant hover:bg-surface-bright text-on-surface rounded-xl text-xs font-bold border border-outline-variant/30 transition-all flex items-center gap-1">
+                                <span class="material-symbols-outlined text-sm">close</span> Clear Board
+                            </button>
+                            <button data-action="resetEditorBoard" data-arg="standard" class="px-3 py-1.5 bg-surface-variant hover:bg-surface-bright text-on-surface rounded-xl text-xs font-bold border border-outline-variant/30 transition-all flex items-center gap-1">
+                                <span class="material-symbols-outlined text-sm">cached</span> Standard Layout
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Interactive Editor Board -->
+                    <div class="relative bg-surface-container border-2 border-outline-variant/40 rounded-2xl p-4 md:p-6 shadow-xl w-full max-w-[500px]">
+                        <!-- Ranks 1-8 -->
+                        <div class="absolute left-1 md:left-2 top-0 bottom-0 flex flex-col justify-around text-[10px] md:text-xs font-bold text-on-surface-variant/40 select-none py-4 md:py-6">
+                            <span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+                        </div>
+                        <div class="ml-4 md:ml-6 mb-2 md:mb-4">
+                            <!-- 8x8 Board grid -->
+                            <div id="editor-board-grid" class="grid grid-cols-8 grid-rows-8 gap-0 border border-outline-variant/40 aspect-square w-full font-bold">
+                                <!-- Generated dynamically in app.js -->
+                            </div>
+                        </div>
+                        <!-- Files A-H -->
+                        <div class="ml-4 md:ml-6 flex justify-around text-[10px] md:text-xs font-bold text-on-surface-variant/40 select-none px-2">
+                            <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span>
+                        </div>
+                    </div>
+
+                    <!-- Piece Palette Selector -->
+                    <div class="w-full max-w-[500px] mt-6 p-4 bg-surface-container rounded-2xl border border-outline-variant/30 shadow-md">
+                        <span class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider block mb-3 text-center">Piece Palette (Select piece to place, then click on the board)</span>
+                        <div class="flex flex-col gap-3">
+                            <!-- White Pieces Row -->
+                            <div class="flex justify-around items-center" id="editor-palette-white">
+                                <!-- Injected dynamically in app.js -->
+                            </div>
+                            <!-- Black Pieces Row -->
+                            <div class="flex justify-around items-center" id="editor-palette-black">
+                                <!-- Injected dynamically in app.js -->
+                            </div>
+                            <!-- Eraser / Action tools -->
+                            <div class="border-t border-outline-variant/20 pt-2 flex justify-center gap-4">
+                                <button id="palette-tool-eraser" data-action="selectPaletteTool" data-arg="eraser" class="px-4 py-1.5 bg-surface-variant text-on-surface rounded-xl text-xs font-bold border border-outline-variant/40 hover:bg-surface-bright transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">delete</span> Eraser
+                                </button>
+                                <button id="palette-tool-select" data-action="selectPaletteTool" data-arg="select" class="px-4 py-1.5 bg-secondary text-on-secondary rounded-xl text-xs font-bold border border-secondary/40 transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">back_hand</span> Inspect / Move
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Form Controls Column -->
+                <div class="xl:col-span-4 space-y-6">
+                    <div class="glass-card rounded-2xl p-6 border border-outline-variant/30 space-y-4">
+                        <span class="text-xs text-secondary font-bold block uppercase tracking-wider">Puzzle Settings</span>
+
+                        <!-- Title -->
+                        <div class="space-y-1">
+                            <label for="editor-puzzle-title" class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Puzzle Title</label>
+                            <input id="editor-puzzle-title" type="text" placeholder="e.g. Back Rank Fork Tactic" class="w-full bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-secondary transition-all" />
+                        </div>
+
+                        <!-- Description -->
+                        <div class="space-y-1">
+                            <label for="editor-puzzle-desc" class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Description</label>
+                            <textarea id="editor-puzzle-desc" rows="3" placeholder="Explain the objective of this puzzle..." class="w-full bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-secondary transition-all font-body-md"></textarea>
+                        </div>
+
+                        <!-- Hint -->
+                        <div class="space-y-1">
+                            <label for="editor-puzzle-hint" class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Hint Text</label>
+                            <input id="editor-puzzle-hint" type="text" placeholder="e.g. Look at the weak f7 square" class="w-full bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-secondary transition-all" />
+                        </div>
+
+                        <!-- Reward Points -->
+                        <div class="space-y-1">
+                            <label for="editor-puzzle-reward" class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">ELO Point Reward</label>
+                            <input id="editor-puzzle-reward" type="number" min="5" max="100" value="15" class="w-full bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-secondary transition-all font-bold" />
+                        </div>
+
+                        <!-- Side to Move -->
+                        <div class="space-y-1">
+                            <span class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider block">Side to Move</span>
+                            <div class="flex gap-2">
+                                <button id="editor-turn-w" data-action="selectEditorTurn" data-arg="w" class="flex-1 py-2 bg-secondary text-on-secondary rounded-xl text-xs font-bold border border-secondary/40 transition-all">
+                                    White to Move
+                                </button>
+                                <button id="editor-turn-b" data-action="selectEditorTurn" data-arg="b" class="flex-1 py-2 bg-surface-container-high text-on-surface rounded-xl text-xs font-bold border border-outline-variant/30 transition-all">
+                                    Black to Move
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Solution inputs -->
+                        <div class="space-y-1">
+                            <span class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider block">Move Solution (e.g. d1-d8)</span>
+                            <div class="flex gap-2">
+                                <input id="editor-solution-from" type="text" maxlength="2" placeholder="From (e.g. d1)" aria-label="Solution starting square" class="w-1/2 bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-3 py-2 text-center focus:outline-none focus:border-secondary transition-all" />
+                                <input id="editor-solution-to" type="text" maxlength="2" placeholder="To (e.g. d8)" aria-label="Solution destination square" class="w-1/2 bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-3 py-2 text-center focus:outline-none focus:border-secondary transition-all" />
+                            </div>
+                        </div>
+
+                        <button data-action="publishCustomPuzzle" class="w-full py-3 bg-secondary text-on-secondary rounded-xl text-xs font-bold transition-all shadow-lg hover:bg-secondary/95 flex items-center justify-center gap-1.5 mt-2">
+                            <span class="material-symbols-outlined text-sm">publish</span> Publish Custom Puzzle
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ============================================== -->
         <!-- 4.3 VISION COORDINATES TRAINER TAB -->
         <!-- ============================================== -->
         <div id="vision-trainer-page" class="hidden min-h-screen pt-24 pb-16 px-margin-mobile md:px-margin-desktop">
@@ -2104,8 +2251,8 @@
                     <p class="text-xs text-on-surface-variant mt-1">This will be broadcast to all students on their dashboards.</p>
                 </div>
                 <div class="flex flex-col gap-3 mt-2">
-                    <input type="text" id="announcement-title-input" placeholder="Title (max 200 chars)" class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-2.5 w-full focus:outline-none focus:border-secondary transition-all">
-                    <textarea id="announcement-body-input" rows="4" placeholder="Announcement content..." class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-2.5 w-full focus:outline-none focus:border-secondary transition-all resize-none"></textarea>
+                    <input type="text" id="announcement-title-input" aria-label="Announcement Title" placeholder="Title (max 200 chars)" class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-2.5 w-full focus:outline-none focus:border-secondary transition-all">
+                    <textarea id="announcement-body-input" aria-label="Announcement Content" rows="4" placeholder="Announcement content..." class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-2.5 w-full focus:outline-none focus:border-secondary transition-all resize-none"></textarea>
                     <label class="flex items-center gap-2 text-xs font-semibold text-on-surface cursor-pointer select-none">
                         <input type="checkbox" id="announcement-pinned-input" class="rounded border-outline-variant bg-background text-secondary focus:ring-secondary">
                         Pin to top
@@ -2130,9 +2277,9 @@
                     <p class="text-xs text-on-surface-variant mt-1">Setup a new in-academy competitive event.</p>
                 </div>
                 <div class="flex flex-col gap-3 mt-2">
-                    <input type="text" id="tournament-title-input" placeholder="Tournament Name (e.g. Summer Arena)" class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-2.5 w-full focus:outline-none focus:border-secondary transition-all">
-                    <textarea id="tournament-desc-input" rows="3" placeholder="Description & rules..." class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-2.5 w-full focus:outline-none focus:border-secondary transition-all resize-none"></textarea>
-                    <input type="text" id="tournament-date-input" placeholder="Start Date & Time (e.g. Next Saturday, 5 PM)" class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-2.5 w-full focus:outline-none focus:border-secondary transition-all">
+                    <input type="text" id="tournament-title-input" aria-label="Tournament Title" placeholder="Tournament Name (e.g. Summer Arena)" class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-2.5 w-full focus:outline-none focus:border-secondary transition-all">
+                    <textarea id="tournament-desc-input" aria-label="Tournament Description" rows="3" placeholder="Description & rules..." class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-2.5 w-full focus:outline-none focus:border-secondary transition-all resize-none"></textarea>
+                    <input type="text" id="tournament-date-input" aria-label="Tournament Date" placeholder="Start Date & Time (e.g. Next Saturday, 5 PM)" class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-2.5 w-full focus:outline-none focus:border-secondary transition-all">
                     <button data-action="submitTournament" class="btn w-full py-2.5 bg-secondary text-on-secondary rounded-xl text-xs font-bold transition-all shadow hover:bg-secondary/90 flex items-center justify-center gap-1.5 mt-2">
                         <span class="material-symbols-outlined text-sm">emoji_events</span> Create Tournament
                     </button>
@@ -2206,7 +2353,7 @@
                 <h3 id="pgn-fen-modal-title" class="font-bold text-on-surface text-lg">Import FEN / PGN</h3>
 
                 <div class="flex flex-col gap-2">
-                    <label class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Format</label>
+                    <span class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">Format</span>
                     <div class="flex gap-2">
                         <button id="btn-modal-format-fen" data-action="selectModalFormat" data-arg="FEN"
                             class="flex-1 py-2 bg-secondary text-on-secondary rounded-xl text-xs font-semibold transition-all">FEN
@@ -2218,7 +2365,7 @@
                 </div>
 
                 <div class="flex flex-col gap-2">
-                    <label id="pgn-fen-input-label"
+                    <label id="pgn-fen-input-label" for="pgn-fen-textarea"
                         class="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider">FEN Data</label>
                     <textarea id="pgn-fen-textarea" rows="4"
                         class="bg-background border border-outline-variant/50 text-on-background text-xs rounded-xl px-4 py-3 w-full focus:outline-none focus:border-secondary transition-all font-mono"

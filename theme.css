@@ -200,52 +200,90 @@
             transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
 
-
-
-        /* ── Rose Three Loader Overlay ──────────────────────────────── */
-        #rose-loader-overlay {
-            position: fixed;
-            inset: 0;
+        /* ── Simple Glassmorphic 3D Chess Loader ────────────────────── */
+        #chess-loader-overlay {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
             z-index: 9999;
+            background: rgba(8, 9, 12, 0.45); /* Muted overlay */
+            backdrop-filter: blur(6px); /* Blur dashboard behind */
+            -webkit-backdrop-filter: blur(6px);
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 300ms ease;
+        }
+        #chess-loader-overlay.visible {
+            opacity: 1;
+            pointer-events: all;
+        }
+        .loader-card {
+            background: rgba(20, 22, 28, 0.85); /* Glass card */
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            border-radius: 20px;
+            width: 210px;
+            height: 230px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 20px;
-            background: rgba(7, 8, 9, 0.72);
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
-            opacity: 0;
+            box-shadow: 0 12px 35px rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            padding: 10px;
+            gap: 4px;
+        }
+        #chess-3d-loader-canvas {
+            width: 130px !important;
+            height: 130px !important;
             pointer-events: none;
-            transition: opacity 240ms cubic-bezier(0.4, 0, 0.2, 1);
         }
-        #rose-loader-overlay.visible {
-            opacity: 1;
-            pointer-events: all;
-        }
-        #rose-loader-overlay .rose-frame {
-            width: min(52vmin, 180px);
-            aspect-ratio: 1;
-            color: #e9c176;
-            filter: drop-shadow(0 0 22px rgba(233, 193, 118, 0.45));
-        }
-        #rose-loader-overlay .rose-frame svg {
+        .loader-hud {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
             width: 100%;
-            height: 100%;
-            overflow: visible;
         }
-        #rose-loader-label {
+        #chess-loader-label {
             font-family: 'Manrope', system-ui, sans-serif;
-            font-size: 13px;
-            font-weight: 600;
-            letter-spacing: 0.2em;
-            text-transform: uppercase;
-            color: rgba(233, 193, 118, 0.75);
-            animation: rose-label-pulse 2.2s ease-in-out infinite;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            color: #e9c176;
+            animation: loader-text-pulse 2.0s ease-in-out infinite;
         }
-        @keyframes rose-label-pulse {
-            0%, 100% { opacity: 0.55; }
-            50%       { opacity: 1; }
+        .loader-progress-container {
+            width: 110px;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 9px;
+            overflow: hidden;
+        }
+        .loader-progress-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #b8860b, #e9c176);
+            box-shadow: 0 0 6px #e9c176;
+            animation: loader-progress-run 3.8s cubic-bezier(0.1, 0.8, 0.2, 1) infinite;
+        }
+        @keyframes loader-progress-run {
+            0% { width: 0%; }
+            50% { width: 72%; }
+            80% { width: 92%; }
+            100% { width: 100%; }
+        }
+        @keyframes loader-text-pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
         }
 
         /* ── Opening Dictionary scrollable list ── */

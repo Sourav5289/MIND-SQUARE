@@ -1342,7 +1342,7 @@ function changeCameraAngle(preset) {
 // CHESS ACADEMY TACTICS CHALLENGES
 // ==========================================
 
-const PUZZLES = [
+let PUZZLES = [
     {
         id: "PZ-001",
         title: "Back Rank Weakness",
@@ -3540,13 +3540,13 @@ function makeEndgameAIMove() {
     if (endgameGame.game_over()) return;
 
     // Use alpha-beta minimax from parent page by swapping references temporarily
-    const tempGame = window.chessGame;
-    window.chessGame = endgameGame;
+    const tempGame = chessGame;
+    chessGame = endgameGame;
     
     // Calculate AI reply (depth 3 is fast and challenging for endgames)
     const bestMove = selectBestMove(3);
     
-    window.chessGame = tempGame; // restore original
+    chessGame = tempGame; // restore original
 
     if (bestMove) {
         endgameGame.move(bestMove);
