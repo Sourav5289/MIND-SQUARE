@@ -3374,6 +3374,8 @@ function startDailyPuzzle() {
 // ================================================================
 // ACADEMY TOURNAMENTS
 // ================================================================
+let loadedAcademyTournamentsList = [];
+
 async function loadAcademyTournaments() {
     const container = document.getElementById('academy-tournaments-list');
     if (!container) return;
@@ -3382,6 +3384,7 @@ async function loadAcademyTournaments() {
         await checkTeacherRole();
         const res = await fetch('/api/tournaments/academy');
         const tournaments = await res.json();
+        loadedAcademyTournamentsList = tournaments;
 
         if (!tournaments.length) {
             container.innerHTML = `
@@ -3523,6 +3526,15 @@ async function updateTournamentStatus(id, status) {
         showNotification('Failed to update.', 'error');
     }
 }
+
+window.challengeTournamentOpponent = function(opponentId, opponentName) {
+    if (typeof window.sendChallengeInvite === 'function') {
+        // Send a 5-minute (300 seconds) challenge to the tournament opponent
+        window.sendChallengeInvite(opponentId, opponentName, 300);
+    } else {
+        showNotification("Failed to send challenge. Please make sure you are connected to the live server.", "error");
+    }
+};
 
 // ================================================================
 // PDF PROGRESS REPORT CARD
@@ -4608,7 +4620,22 @@ async function toggleTournamentDetails(tournamentId, btn) {
                                 </button>
                             `;
                         } else {
-                            actionHtml = `<span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[8px] font-bold border border-amber-500/20">WAITING</span>`;
+                            const currentUser = getCurrentUser();
+                            const isMyMatch = currentUser && (currentUser.id === pair[0].id || currentUser.id === pair[1].id);
+                            const tournament = loadedAcademyTournamentsList.find(t => t.id === tournamentId);
+                            const isOngoing = tournament && tournament.status === 'ongoing';
+
+                            if (isOngoing && isMyMatch) {
+                                const opponent = currentUser.id === pair[0].id ? pair[1] : pair[0];
+                                actionHtml = `
+                                    <button data-action="challengeTournamentOpponent" data-opponent-id="${opponent.id}" data-opponent-name="${opponent.name.replace(/'/g, "\\'")}"
+                                        class="px-2 py-1 bg-secondary text-on-secondary rounded text-[8px] font-bold hover:scale-105 transition-all flex items-center gap-0.5 cursor-pointer animate-pulse">
+                                        ⚔️ Play Match
+                                    </button>
+                                `;
+                            } else {
+                                actionHtml = `<span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[8px] font-bold border border-amber-500/20">WAITING</span>`;
+                            }
                         }
 
                         return `

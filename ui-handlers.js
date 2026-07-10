@@ -694,6 +694,14 @@ function executeGlobalAction(action, arg, target, event) {
                 );
             }
             break;
+        case 'challengeTournamentOpponent':
+            if (typeof window.challengeTournamentOpponent === 'function') {
+                window.challengeTournamentOpponent(
+                    target.getAttribute('data-opponent-id'),
+                    target.getAttribute('data-opponent-name')
+                );
+            }
+            break;
         case 'sendChallengeInvite':
             if (typeof window.sendChallengeInvite === 'function') {
                 window.sendChallengeInvite(
