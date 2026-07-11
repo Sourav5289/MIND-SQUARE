@@ -14,6 +14,7 @@
     let spectatorBlack = null;
     let spectatorMoveList = [];
     let spectatorOrientation = 'white';
+    let spectatorLastMove = null;  // Keeps track of the last move to highlight
 
     // ── Board config (mirrors chess-engine.js square size logic) ─
     const SQ = 60; // px per square in spectator board
@@ -24,6 +25,7 @@
         spectatorWhite = whiteName;
         spectatorBlack = blackName;
         spectatorMoveList = [];
+        spectatorLastMove = null;
 
         // Initialise chess.js position
         if (typeof Chess !== 'undefined') {
@@ -69,6 +71,7 @@
             }));
         }
         spectatorGameId = null;
+        spectatorLastMove = null;
         const modal = document.getElementById('spectator-modal');
         if (modal) {
             modal.classList.add('hidden');
@@ -96,7 +99,7 @@
             renderSpectatorMoveList();
         }
 
-        renderSpectatorBoard();
+        // Flash/highlight last move and re-draw board
         flashLastMove(move);
         setSpectatorStatus('🔴 Live', 'text-emerald-400');
     };
@@ -120,13 +123,31 @@
         const fen = spectatorGame ? spectatorGame.fen() : 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
         const position = fenToPosition(fen);
 
-        // Draw squares
+        // Draw squares (Classical Green Theme)
         for (let row = 0; row < 8; row++) {
             for (let col = 0; col < 8; col++) {
                 const isLight = (row + col) % 2 === 0;
-                ctx.fillStyle = isLight ? '#f0d9b5' : '#b58863';
+                ctx.fillStyle = isLight ? '#eeeed2' : '#769656';
                 ctx.fillRect(col * SQ, row * SQ, SQ, SQ);
             }
+        }
+
+        // Draw highlight overlays for the last move (if any)
+        if (spectatorLastMove) {
+            const from = typeof spectatorLastMove === 'string' ? spectatorLastMove.substring(0, 2) : spectatorLastMove.from;
+            const to = typeof spectatorLastMove === 'string' ? spectatorLastMove.substring(2, 4) : spectatorLastMove.to;
+
+            [from, to].forEach((sq, idx) => {
+                if (sq && sq.length >= 2) {
+                    const file = sq.charCodeAt(0) - 97; // a=0
+                    const rank = 8 - parseInt(sq[1], 10);
+                    const col = spectatorOrientation === 'white' ? file : 7 - file;
+                    const row = spectatorOrientation === 'white' ? rank : 7 - rank;
+
+                    ctx.fillStyle = idx === 0 ? 'rgba(255, 235, 59, 0.35)' : 'rgba(255, 235, 59, 0.5)';
+                    ctx.fillRect(col * SQ, row * SQ, SQ, SQ);
+                }
+            });
         }
 
         // Draw coordinate labels
@@ -137,22 +158,23 @@
                 ? 'abcdefgh'[i]
                 : 'hgfedcba'[i];
 
-            ctx.fillStyle = i % 2 === 0 ? '#b58863' : '#f0d9b5';
+            // Use opposite theme colors for legibility on labels
+            ctx.fillStyle = i % 2 === 0 ? '#769656' : '#eeeed2';
             ctx.fillText(rankLabel, 3, i * SQ + SQ * 0.22);
 
-            ctx.fillStyle = (7 - i) % 2 === 0 ? '#b58863' : '#f0d9b5';
+            ctx.fillStyle = (7 - i) % 2 === 0 ? '#769656' : '#eeeed2';
             ctx.fillText(fileLabel, i * SQ + SQ * 0.83, size - 3);
         }
 
-        // Draw pieces
+        // Draw pieces (Using crisp solid vector style filled with outline)
         const pieceSymbols = {
-            'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
+            'K': '♚', 'Q': '♛', 'R': '♜', 'B': '♝', 'N': '♞', 'P': '♟',
             'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟'
         };
 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font = `${SQ * 0.72}px serif`;
+        ctx.font = `${SQ * 0.72}px "DejaVu Sans", "Segoe UI Symbol", sans-serif`;
 
         for (let row = 0; row < 8; row++) {
             for (let col = 0; col < 8; col++) {
@@ -161,12 +183,15 @@
                 const piece = position[displayRow] ? position[displayRow][displayCol] : null;
                 if (piece && pieceSymbols[piece]) {
                     const isWhitePiece = piece === piece.toUpperCase();
-                    // Shadow for contrast
-                    ctx.shadowColor = isWhitePiece ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.2)';
-                    ctx.shadowBlur = 3;
-                    ctx.fillStyle = isWhitePiece ? '#fff' : '#1a1a2e';
+
+                    // Draw solid piece fill
+                    ctx.fillStyle = isWhitePiece ? '#ffffff' : '#262626';
                     ctx.fillText(pieceSymbols[piece], col * SQ + SQ / 2, row * SQ + SQ / 2);
-                    ctx.shadowBlur = 0;
+
+                    // Draw clean outline border around piece
+                    ctx.strokeStyle = isWhitePiece ? '#1a1a1a' : '#e2e2e2';
+                    ctx.lineWidth = isWhitePiece ? 1.5 : 0.8;
+                    ctx.strokeText(pieceSymbols[piece], col * SQ + SQ / 2, row * SQ + SQ / 2);
                 }
             }
         }
@@ -174,27 +199,7 @@
 
     // ── Flash last move highlight ─────────────────────────────────
     function flashLastMove(move) {
-        if (!move) return;
-        const canvas = document.getElementById('spectator-board-canvas');
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-
-        // Parse 'e2e4' style or { from, to } object
-        const from = typeof move === 'string' ? move.substring(0, 2) : move.from;
-        const to = typeof move === 'string' ? move.substring(2, 4) : move.to;
-
-        [from, to].forEach((sq, idx) => {
-            if (!sq || sq.length < 2) return;
-            const file = sq.charCodeAt(0) - 97; // a=0
-            const rank = 8 - parseInt(sq[1]);
-            const col = spectatorOrientation === 'white' ? file : 7 - file;
-            const row = spectatorOrientation === 'white' ? rank : 7 - rank;
-
-            ctx.fillStyle = idx === 0 ? 'rgba(255,210,0,0.45)' : 'rgba(255,210,0,0.65)';
-            ctx.fillRect(col * SQ, row * SQ, SQ, SQ);
-        });
-
-        // Re-draw pieces on top
+        spectatorLastMove = move;
         renderSpectatorBoard();
     }
 
