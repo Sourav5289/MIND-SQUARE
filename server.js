@@ -2948,6 +2948,9 @@ function initWebSocketServer(httpServer) {
                                     blackPlayerName: ws.userName,
                                     fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
                                 });
+
+                                // Broadcast to all clients to update tournament bracket view
+                                broadcastToAll({ type: 'tournaments_updated' });
                             }
                         }
                         break;
@@ -3016,6 +3019,9 @@ function initWebSocketServer(httpServer) {
 
                             // Remove game from active games list
                             activeGames.delete(data.gameId);
+
+                            // Broadcast to all clients to update tournament bracket view
+                            broadcastToAll({ type: 'tournaments_updated' });
                         }
                         break;
 
@@ -3050,6 +3056,19 @@ function initWebSocketServer(httpServer) {
 
                             // Remove from active games list
                             activeGames.delete(data.gameId);
+
+                            // Broadcast to all clients to update tournament bracket view
+                            broadcastToAll({ type: 'tournaments_updated' });
+                        }
+                        break;
+
+                    case 'game_complete':
+                        {
+                            // Remove game from active games list
+                            activeGames.delete(data.gameId);
+
+                            // Broadcast to all clients to update tournament bracket view
+                            broadcastToAll({ type: 'tournaments_updated' });
                         }
                         break;
 

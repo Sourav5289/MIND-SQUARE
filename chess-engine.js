@@ -715,6 +715,14 @@ function checkGameStatus() {
             recordGameResult(outcome);
         }
 
+        // Notify server that live game is complete so it's removed from active registry
+        if (window._liveMode && window.liveWS && window.liveWS.readyState === WebSocket.OPEN) {
+            window.liveWS.send(JSON.stringify({
+                type: 'game_complete',
+                gameId: window._liveGameId
+            }));
+        }
+
         // Disable live mode on game completion
         window._liveMode = false;
         const chatWrapper = document.getElementById('live-chat-wrapper');
