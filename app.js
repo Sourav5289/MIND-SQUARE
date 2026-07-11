@@ -2266,6 +2266,7 @@ async function logoutUser() {
             _liveWS.close();
         } catch (e) {}
         _liveWS = null;
+        window.liveWS = null;
     }
     try {
         await fetch('/api/auth/logout', {
@@ -3432,10 +3433,7 @@ async function loadAcademyTournaments() {
                                 </button>
                             ` : ''}
                         </div>
-                        <button data-action="toggleTournamentDetails" data-id="${t.id}" class="py-1.5 px-3 bg-surface-container-high text-on-surface border border-outline-variant/35 rounded-xl text-[11px] font-bold transition-all hover:bg-surface-variant/30 flex items-center justify-center gap-1.5 w-full">
-                            <span class="material-symbols-outlined text-sm">visibility</span> View Bracket & Standings
-                        </button>
-                        <div id="tournament-details-${t.id}" class="hidden mt-2 p-3 rounded-xl bg-surface-container-low border border-outline-variant/20 space-y-3">
+                        <div id="tournament-details-${t.id}" class="mt-2 p-3 rounded-xl bg-surface-container-low border border-outline-variant/20 space-y-3">
                             <div id="tournament-players-${t.id}">
                                 <span class="text-[9px] font-bold text-secondary uppercase tracking-wider block mb-1">Players</span>
                                 <div id="players-list-${t.id}" class="flex flex-wrap gap-1">
@@ -3453,6 +3451,11 @@ async function loadAcademyTournaments() {
                 </div>
             `;
         }).join('');
+
+        // Auto-populate details (players and pairings) for each tournament on render
+        tournaments.forEach(t => {
+            window.loadTournamentDetailsInline(t.id);
+        });
     } catch (e) {
         container.innerHTML = `<div class="col-span-full text-center py-8 text-red-400 text-sm">Failed to load tournaments.</div>`;
     }
@@ -3934,6 +3937,7 @@ function initLiveChallenge() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
     _liveWS = new WebSocket(wsUrl);
+    window.liveWS = _liveWS;
 
     _liveWS.onopen = () => {
         _liveWS.send(JSON.stringify({ type: 'register', userId: user.id, userName: user.name }));
@@ -3962,6 +3966,7 @@ function initLiveChallenge() {
     _liveWS.onclose = (event) => {
         console.warn("Live challenge WebSocket closed. Code:", event.code, "Reason:", event.reason);
         _liveWS = null;
+        window.liveWS = null;
         
         // Hide live challenge search bar
         const searchContainer = document.getElementById('live-challenge-search-container');
@@ -4008,6 +4013,16 @@ function handleLiveWSMessage(msg) {
         case 'tournaments_updated':
             if (typeof loadAcademyTournaments === 'function') {
                 loadAcademyTournaments();
+            }
+            break;
+        case 'spectator_move':
+            if (typeof window.handleSpectatorMove === 'function') {
+                window.handleSpectatorMove(msg.gameId, msg.move, msg.fen, msg.san);
+            }
+            break;
+        case 'spectator_game_over':
+            if (typeof window.handleSpectatorGameOver === 'function') {
+                window.handleSpectatorGameOver(msg.gameId, msg.result);
             }
             break;
         case 'opponent_move':
@@ -4552,112 +4567,116 @@ async function deleteRecording(scheduleId, id) {
 // ================================================================
 // TOURNAMENT DETAILS & BRACKET FIXTURES GENERATOR
 // ================================================================
+window.loadTournamentDetailsInline = async function(tournamentId) {
+    const playersList = document.getElementById(`players-list-${tournamentId}`);
+    const pairingsList = document.getElementById(`pairings-list-${tournamentId}`);
+    if (!playersList && !pairingsList) return;
+
+    try {
+        const res = await fetch(`/api/tournaments/academy/${tournamentId}/registrations`, { credentials: 'include' });
+        if (!res.ok) throw new Error();
+        const players = await res.json();
+
+        // Populate players list
+        if (playersList) {
+            if (!players.length) {
+                playersList.innerHTML = `<span class="text-[10px] text-on-surface-variant italic">No players registered yet.</span>`;
+            } else {
+                playersList.innerHTML = players.map(p => `
+                    <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-surface-container-high border border-outline-variant text-on-surface"
+                        title="${p.category || 'Beginner'} · ${p.points} ELO">
+                        👤 ${escapeHTML(p.name)}
+                    </span>
+                `).join('');
+            }
+        }
+
+        // Generate bracket fixtures
+        if (pairingsList) {
+            if (players.length < 2) {
+                pairingsList.innerHTML = `<span class="text-[10px] text-on-surface-variant italic">At least 2 players required to build bracket.</span>`;
+            } else {
+                // Fetch active live games from server
+                let activeGames = [];
+                try {
+                    const gamesRes = await fetch('/api/games/active');
+                    if (gamesRes.ok) {
+                        activeGames = await gamesRes.json();
+                    }
+                } catch (err) {
+                    console.error('Failed to load active games:', err);
+                }
+
+                // Generate a deterministic bracket pairings based on player list seed
+                const roundPairings = generateBracketPairings(players);
+                pairingsList.innerHTML = roundPairings.map((pair, idx) => {
+                    // Check if these two players have an active live game
+                    const activeMatch = activeGames.find(g => 
+                        (g.whitePlayerId === pair[0].id && g.blackPlayerId === pair[1].id) ||
+                        (g.whitePlayerId === pair[1].id && g.blackPlayerId === pair[0].id)
+                    );
+
+                    const hasBye = pair[1].name && pair[1].name.includes('BYE');
+                    let actionHtml = '';
+
+                    if (hasBye) {
+                        actionHtml = `<span class="px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 text-[8px] font-bold border border-slate-500/20">BYE</span>`;
+                    } else if (activeMatch) {
+                        actionHtml = `
+                            <button data-action="openSpectatorModal" data-game-id="${activeMatch.gameId}" data-white-name="${activeMatch.whitePlayerName.replace(/'/g, "\\'")}" data-black-name="${activeMatch.blackPlayerName.replace(/'/g, "\\'")}" data-fen="${activeMatch.fen}" 
+                                class="px-2 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded text-[8px] font-bold hover:scale-105 transition-all flex items-center gap-0.5 cursor-pointer">
+                                <span class="material-symbols-outlined text-[10px]">visibility</span> Watch Live
+                            </button>
+                        `;
+                    } else {
+                        const currentUser = getCurrentUser();
+                        const isMyMatch = currentUser && (currentUser.id === pair[0].id || currentUser.id === pair[1].id);
+                        const tournament = loadedAcademyTournamentsList.find(t => t.id === tournamentId);
+                        const isOngoing = tournament && tournament.status === 'ongoing';
+
+                        if (isOngoing && isMyMatch) {
+                            const opponent = currentUser.id === pair[0].id ? pair[1] : pair[0];
+                            actionHtml = `
+                                <button data-action="challengeTournamentOpponent" data-opponent-id="${opponent.id}" data-opponent-name="${opponent.name.replace(/'/g, "\\'")}"
+                                    class="px-2 py-1 bg-secondary text-on-secondary rounded text-[8px] font-bold hover:scale-105 transition-all flex items-center gap-0.5 cursor-pointer animate-pulse">
+                                    ⚔️ Play Match
+                                </button>
+                            `;
+                        } else {
+                            actionHtml = `<span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[8px] font-bold border border-amber-500/20">WAITING</span>`;
+                        }
+                    }
+
+                    return `
+                        <div class="flex items-center justify-between p-2 rounded-lg bg-surface-container border border-outline-variant/30 text-[10px] gap-2">
+                            <span class="font-bold text-on-surface">Match ${idx + 1}</span>
+                            <div class="flex items-center gap-1.5 flex-1 justify-center text-center">
+                                <span class="text-secondary font-bold truncate max-w-[70px]">${escapeHTML(pair[0].name)}</span>
+                                <span class="text-on-surface-variant/40">vs</span>
+                                <span class="text-primary font-bold truncate max-w-[70px]">${escapeHTML(pair[1].name)}</span>
+                            </div>
+                            ${actionHtml}
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load tournament details:', e);
+    }
+};
+
 async function toggleTournamentDetails(tournamentId, btn) {
     const details = document.getElementById(`tournament-details-${tournamentId}`);
     if (!details) return;
 
     if (details.classList.contains('hidden')) {
         details.classList.remove('hidden');
-        btn.classList.add('bg-secondary/20', 'text-secondary', 'border-secondary/30');
-        
-        // Fetch registered players
-        try {
-            const res = await fetch(`/api/tournaments/academy/${tournamentId}/registrations`, { credentials: 'include' });
-            if (!res.ok) throw new Error();
-            const players = await res.json();
-
-            // Populate players list
-            const playersList = document.getElementById(`players-list-${tournamentId}`);
-            if (playersList) {
-                if (!players.length) {
-                    playersList.innerHTML = `<span class="text-[10px] text-on-surface-variant italic">No players registered yet.</span>`;
-                } else {
-                    playersList.innerHTML = players.map(p => `
-                        <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-surface-container-high border border-outline-variant text-on-surface"
-                            title="${p.category || 'Beginner'} · ${p.points} ELO">
-                            👤 ${escapeHTML(p.name)}
-                        </span>
-                    `).join('');
-                }
-            }
-
-            // Generate bracket fixtures
-            const pairingsList = document.getElementById(`pairings-list-${tournamentId}`);
-            if (pairingsList) {
-                if (players.length < 2) {
-                    pairingsList.innerHTML = `<span class="text-[10px] text-on-surface-variant italic">At least 2 players required to build bracket.</span>`;
-                } else {
-                    // Fetch active live games from server
-                    let activeGames = [];
-                    try {
-                        const gamesRes = await fetch('/api/games/active');
-                        if (gamesRes.ok) {
-                            activeGames = await gamesRes.json();
-                        }
-                    } catch (err) {
-                        console.error('Failed to load active games:', err);
-                    }
-
-                    // Generate a deterministic bracket pairings based on player list seed
-                    const roundPairings = generateBracketPairings(players);
-                    pairingsList.innerHTML = roundPairings.map((pair, idx) => {
-                        // Check if these two players have an active live game
-                        const activeMatch = activeGames.find(g => 
-                            (g.whitePlayerId === pair[0].id && g.blackPlayerId === pair[1].id) ||
-                            (g.whitePlayerId === pair[1].id && g.blackPlayerId === pair[0].id)
-                        );
-
-                        const hasBye = pair[1].name && pair[1].name.includes('BYE');
-                        let actionHtml = '';
-
-                        if (hasBye) {
-                            actionHtml = `<span class="px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 text-[8px] font-bold border border-slate-500/20">BYE</span>`;
-                        } else if (activeMatch) {
-                            actionHtml = `
-                                <button data-action="openSpectatorModal" data-game-id="${activeMatch.gameId}" data-white-name="${activeMatch.whitePlayerName.replace(/'/g, "\\'")}" data-black-name="${activeMatch.blackPlayerName.replace(/'/g, "\\'")}" data-fen="${activeMatch.fen}" 
-                                    class="px-2 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded text-[8px] font-bold hover:scale-105 transition-all flex items-center gap-0.5 cursor-pointer">
-                                    <span class="material-symbols-outlined text-[10px]">visibility</span> Watch Live
-                                </button>
-                            `;
-                        } else {
-                            const currentUser = getCurrentUser();
-                            const isMyMatch = currentUser && (currentUser.id === pair[0].id || currentUser.id === pair[1].id);
-                            const tournament = loadedAcademyTournamentsList.find(t => t.id === tournamentId);
-                            const isOngoing = tournament && tournament.status === 'ongoing';
-
-                            if (isOngoing && isMyMatch) {
-                                const opponent = currentUser.id === pair[0].id ? pair[1] : pair[0];
-                                actionHtml = `
-                                    <button data-action="challengeTournamentOpponent" data-opponent-id="${opponent.id}" data-opponent-name="${opponent.name.replace(/'/g, "\\'")}"
-                                        class="px-2 py-1 bg-secondary text-on-secondary rounded text-[8px] font-bold hover:scale-105 transition-all flex items-center gap-0.5 cursor-pointer animate-pulse">
-                                        ⚔️ Play Match
-                                    </button>
-                                `;
-                            } else {
-                                actionHtml = `<span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[8px] font-bold border border-amber-500/20">WAITING</span>`;
-                            }
-                        }
-
-                        return `
-                            <div class="flex items-center justify-between p-2 rounded-lg bg-surface-container border border-outline-variant/30 text-[10px] gap-2">
-                                <span class="font-bold text-on-surface">Match ${idx + 1}</span>
-                                <div class="flex items-center gap-1.5 flex-1 justify-center text-center">
-                                    <span class="text-secondary font-bold truncate max-w-[70px]">${escapeHTML(pair[0].name)}</span>
-                                    <span class="text-on-surface-variant/40">vs</span>
-                                    <span class="text-primary font-bold truncate max-w-[70px]">${escapeHTML(pair[1].name)}</span>
-                                </div>
-                                ${actionHtml}
-                            </div>
-                        `;
-                    }).join('');
-                }
-            }
-        } catch (e) {
-            showNotification('Failed to load tournament details.', 'error');
-        }
+        if (btn) btn.classList.add('bg-secondary/20', 'text-secondary', 'border-secondary/30');
+        await window.loadTournamentDetailsInline(tournamentId);
     } else {
         details.classList.add('hidden');
-        btn.classList.remove('bg-secondary/20', 'text-secondary', 'border-secondary/30');
+        if (btn) btn.classList.remove('bg-secondary/20', 'text-secondary', 'border-secondary/30');
     }
 }
 
